@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -7,342 +8,550 @@ from plotly.subplots import make_subplots
 import db
 
 st.set_page_config(page_title="Storylane SEO Dashboard", layout="wide", page_icon="📊")
-st.title("Storylane · Demo-led SEO Dashboard")
-st.caption("Phase 1 + Phase 2 cluster performance · Google Search Console data")
+st.title("Storylane · Demo-led SEO dashboard")
 
-# ── Guard ─────────────────────────────────────────────────────────────────────
 if not db.has_data():
-    st.warning(
-        "No data in database yet. "
-        "Populate `data/pages/` and `data/keywords/` with monthly JSON files, "
-        "then run `python ingest.py`."
-    )
-    st.stop()
+    with st.spinner("Building database from GSC exports..."):
+        import ingest_gsc
+        ingest_gsc.main()
+        if os.path.exists(os.path.join(os.path.dirname(__file__), "generate_estimated.py")):
+            import generate_estimated
+            generate_estimated.main()
+    if not db.has_data():
+        st.warning("No data. Add XLSX exports to `data/gsc-exports/` and redeploy.")
+        st.stop()
 
-# ── Shared state ──────────────────────────────────────────────────────────────
-months   = db.available_months()
+months = db.available_months()
 clusters = db.available_clusters()
-latest   = months[-1]
-earliest = months[0]
+est_months = db.estimated_months()
+latest = months[-1]
+
+ESTIMATED_DASH = "dot"
+ESTIMATED_COLOR = "rgba(180,180,180,0.3)"
 
 
-def _ctr_color(val):
-    try:
-        v = float(str(val).replace("%", ""))
-    except Exception:
-        return ""
-    if v >= 1.5:
-        return "background-color: #d4edda; color: #155724"
-    elif v >= 0.5:
-        return "background-color: #fff3cd; color: #856404"
-    return "background-color: #f8d7da; color: #721c24"
+def _add_estimated_bands(fig, months_list, est_set, row=None, col=None):
+    """Add shaded vertical bands for estimated months."""
+    for m in months_list:
+        if m in est_set:
+            kwargs = dict(
+                x0=m, x1=m,
+                fillcolor=ESTIMATED_COLOR, opacity=0.4,
+                layer="below", line_width=0,
+            )
+            if row and col:
+                fig.add_vrect(**kwargs, row=row, col=col)
+            else:
+                fig.add_vrect(**kwargs)
 
 
+def _format_month_label(m: str) -> str:
+    """2026-04 → Apr '26"""
+    parts = m.split("-")
+    month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
+    return f"{month_names[int(parts[1])-1]} '{parts[0][2:]}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 Cluster Overview",
-    "🎯 Position Health",
-    "📉 AIO Signature",
-    "🔍 Query Deep Dive",
+    "📊 Cluster scorecard",
+    "📈 Cluster trends",
+    "🔀 Position filter",
+    "🔍 Query deep dive",
 ])
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TAB 1 — Cluster Overview
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 1 — Cluster scorecard
+# ═══════════════════════════════════════════════════════════════════════════
 with tab1:
-    st.subheader("Cluster Overview")
+    st.subheader("Cluster scorecard")
+    st.caption(
+        "Peak (Feb–Apr 2025) vs last 3 individual months. "
+        "Columns with a * contain estimated data."
+    )
 
-    last3_start = months[-3] if len(months) >= 3 else earliest
-    period_options = {
-        "Post-peak Q1'25":  ("2025-01", "2025-04"),
-        "Q1'26":            ("2026-01", "2026-03"),
-        f"Last 3 months ({last3_start} – {latest})": (last3_start, latest),
-        f"Current ({latest})": (latest, latest),
-    }
-
-    selected_period = st.selectbox("Period", list(period_options.keys()), index=2)
-    start, end = period_options[selected_period]
-
-    summary = db.cluster_summary(periods={selected_period: (start, end)})
-    summary = summary[summary["period"] == selected_period].drop(columns=["period"])
-
-    if summary.empty:
-        st.info(f"No data for the selected period ({start} → {end}).")
+    score_df = db.scorecard_data()
+    if score_df.empty:
+        st.info("No data available.")
     else:
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Total Clicks",      f"{summary['clicks'].sum():,.0f}")
-        col2.metric("Total Impressions", f"{summary['impressions'].sum() / 1e6:.1f}M")
-        total_ctr = (
-            summary["clicks"].sum() / summary["impressions"].sum() * 100
-            if summary["impressions"].sum() > 0 else 0.0
-        )
-        col3.metric("Avg CTR",          f"{total_ctr:.2f}%")
-        col4.metric("Clusters Tracked", len(summary))
+        period_labels = score_df["period"].unique().tolist()
 
-        st.divider()
+        pivot_clicks = score_df.pivot_table(
+            index="cluster", columns="period", values="clicks", aggfunc="sum"
+        ).reindex(columns=period_labels).fillna(0).astype(int)
 
-        disp = summary.copy()
-        disp["CTR"]          = disp["ctr"].apply(lambda x: f"{x:.2f}%")
-        disp["Impressions"]  = disp["impressions"].apply(lambda x: f"{x:,.0f}")
-        disp["Clicks"]       = disp["clicks"].apply(lambda x: f"{x:,.0f}")
-        disp["Avg Position"] = disp["avg_position"].apply(lambda x: f"{x:.1f}")
+        pivot_imp = score_df.pivot_table(
+            index="cluster", columns="period", values="impressions", aggfunc="sum"
+        ).reindex(columns=period_labels).fillna(0).astype(int)
 
-        styled = (
-            disp[["cluster", "Clicks", "Impressions", "CTR", "Avg Position", "pages"]]
-            .rename(columns={"cluster": "Cluster", "pages": "Pages"})
-            .style.applymap(_ctr_color, subset=["CTR"])
-        )
-        st.dataframe(styled, use_container_width=True, hide_index=True)
+        pivot_ctr = score_df.pivot_table(
+            index="cluster", columns="period", values="ctr", aggfunc="mean"
+        ).reindex(columns=period_labels).fillna(0).round(2)
 
-        st.divider()
-        col_a, col_b = st.columns(2)
+        pivot_pos = score_df.pivot_table(
+            index="cluster", columns="period", values="avg_position", aggfunc="mean"
+        ).reindex(columns=period_labels).fillna(0).round(1)
 
-        with col_a:
-            st.markdown("**Clicks by Cluster**")
-            fig = px.bar(
-                summary.sort_values("clicks", ascending=True),
-                x="clicks", y="cluster", orientation="h",
-                color="ctr",
-                color_continuous_scale=["#dc3545", "#ffc107", "#28a745"],
-                range_color=[0, 3],
-                labels={"clicks": "Clicks", "cluster": "", "ctr": "CTR %"},
+        peak_label = period_labels[0]
+        current_label = period_labels[-1]
+
+        display_rows = []
+        for cluster in pivot_clicks.index:
+            peak_clicks = pivot_clicks.loc[cluster, peak_label]
+            curr_clicks = pivot_clicks.loc[cluster, current_label]
+            delta_pct = (
+                round((curr_clicks - peak_clicks) / peak_clicks * 100)
+                if peak_clicks > 0 else None
             )
-            fig.update_layout(
-                height=500, margin=dict(l=0, r=0, t=0, b=0),
-                coloraxis_colorbar=dict(title="CTR %"),
-            )
-            st.plotly_chart(fig, use_container_width=True)
 
-        with col_b:
-            st.markdown("**CTR vs Impressions · Bubble = Clicks**")
-            plot_df = summary[summary["clicks"] > 0].copy()
-            fig2 = px.scatter(
-                plot_df,
-                x="impressions", y="ctr",
-                size="clicks", color="cluster",
-                hover_name="cluster",
-                labels={"impressions": "Impressions", "ctr": "CTR (%)"},
-                size_max=50,
-            )
-            fig2.add_hline(y=1.5, line_dash="dash", line_color="green",
-                           annotation_text="Healthy CTR (1.5%)")
-            fig2.add_hline(y=0.5, line_dash="dash", line_color="red",
-                           annotation_text="Danger zone (0.5%)")
-            fig2.update_layout(height=500, margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig2, use_container_width=True)
+            row = {"Cluster": cluster}
+            for p in period_labels:
+                row[f"Clicks {p}"] = f"{int(pivot_clicks.loc[cluster, p]):,}"
+                row[f"Impr {p}"] = f"{int(pivot_imp.loc[cluster, p]):,}"
+                row[f"CTR {p}"] = f"{pivot_ctr.loc[cluster, p]:.2f}%"
+                row[f"Pos {p}"] = f"{pivot_pos.loc[cluster, p]:.1f}"
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TAB 2 — Position Health
-# ─────────────────────────────────────────────────────────────────────────────
-with tab2:
-    st.subheader("Position Health · Ranking Tracker")
-    st.caption("Number of queries in each ranking bucket, tracked month by month.")
+            row["Δ Clicks"] = f"{delta_pct:+d}%" if delta_pct is not None else "New"
+            display_rows.append(row)
 
-    t2_cluster = st.selectbox("Cluster", clusters, key="t2_cluster")
-    pos_df = db.position_distribution_over_time(t2_cluster)
-
-    if pos_df.empty:
-        st.info("No keyword data for this cluster yet.")
-    else:
-        fig = go.Figure()
-        bucket_cfg = [
-            ("top_1",  "Top 1.5 (absolute #1)", "#0d6efd"),
-            ("top_3",  "Top 3",                 "#198754"),
-            ("top_5",  "Top 5",                 "#ffc107"),
-            ("top_10", "Top 10",                "#6c757d"),
-        ]
-        for col, label, color in bucket_cfg:
-            if col in pos_df.columns:
-                fig.add_trace(go.Scatter(
-                    x=pos_df["month"], y=pos_df[col],
-                    name=label,
-                    line=dict(color=color, width=2),
-                    mode="lines+markers",
-                ))
-
-        fig.update_layout(
-            height=380, hovermode="x unified",
-            margin=dict(l=0, r=0, t=0, b=0),
-            yaxis_title="Query count",
-            legend=dict(orientation="h", y=-0.18),
+        display_df = pd.DataFrame(display_rows).sort_values(
+            f"Clicks {current_label}",
+            key=lambda s: s.str.replace(",", "").astype(int),
+            ascending=False,
         )
-        st.plotly_chart(fig, use_container_width=True)
 
-        st.divider()
-        st.markdown("**Peak vs Current · Retention by Bucket**")
+        click_cols = ["Cluster"] + [f"Clicks {p}" for p in period_labels] + ["Δ Clicks"]
+        ctr_cols = ["Cluster"] + [f"CTR {p}" for p in period_labels]
+        pos_cols = ["Cluster"] + [f"Pos {p}" for p in period_labels]
 
-        peak_row = pos_df.loc[pos_df["top_1"].idxmax()]
-        curr_row = pos_df.iloc[-1]
+        metric_view = st.radio(
+            "Show", ["Clicks", "CTR", "Avg position", "Impressions"],
+            horizontal=True, key="scorecard_metric",
+        )
 
-        ret_rows = []
-        for col, label in [("top_1", "Top 1.5"), ("top_3", "Top 3"),
-                            ("top_5", "Top 5"),   ("top_10", "Top 10")]:
-            peak_val = int(peak_row[col])
-            curr_val = int(curr_row[col])
-            pct = round(curr_val / peak_val * 100, 1) if peak_val > 0 else 100.0
-            ret_rows.append({
-                "Bucket":    label,
-                "Peak":      peak_val,
-                "Current":   curr_val,
-                "Retention": f"{pct:.0f}%",
-            })
+        if metric_view == "Clicks":
+            cols_show = click_cols
+        elif metric_view == "CTR":
+            cols_show = ctr_cols
+        elif metric_view == "Avg position":
+            cols_show = pos_cols
+        else:
+            cols_show = ["Cluster"] + [f"Impr {p}" for p in period_labels]
 
-        def _ret_color(val):
+        def _delta_color(val):
             try:
-                v = float(str(val).replace("%", ""))
+                v = int(str(val).replace("%", "").replace("+", ""))
             except Exception:
                 return ""
-            if v >= 70:   return "background-color: #d4edda; color: #155724"
-            elif v >= 40: return "background-color: #fff3cd; color: #856404"
+            if v >= 0:
+                return "background-color: #d4edda; color: #155724"
+            elif v >= -30:
+                return "background-color: #fff3cd; color: #856404"
+            return "background-color: #f8d7da; color: #721c24"
+
+        styled = display_df[cols_show].style
+        if "Δ Clicks" in cols_show:
+            styled = styled.applymap(_delta_color, subset=["Δ Clicks"])
+        st.dataframe(styled, use_container_width=True, hide_index=True, height=600)
+
+        st.divider()
+        st.markdown("**Clicks by cluster — current month**")
+        curr_data = score_df[score_df["period"] == current_label].sort_values("clicks", ascending=True)
+        fig = px.bar(
+            curr_data, x="clicks", y="cluster", orientation="h",
+            color="ctr", color_continuous_scale=["#dc3545", "#ffc107", "#28a745"],
+            range_color=[0, 3],
+            labels={"clicks": "Clicks", "cluster": "", "ctr": "CTR %"},
+        )
+        fig.update_layout(height=500, margin=dict(l=0, r=0, t=0, b=0))
+        st.plotly_chart(fig, use_container_width=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 2 — Cluster trends (the big one)
+# ═══════════════════════════════════════════════════════════════════════════
+with tab2:
+    st.subheader("Cluster trends — month over month")
+
+    t2_cluster = st.selectbox("Cluster", clusters, key="t2_cluster")
+
+    st.caption(
+        "Shaded columns = estimated data (will be replaced when real data is backfilled). "
+        "Dashed lines = estimated segments."
+    )
+
+    # ── Query position counts ────────────────────────────────────────────
+    st.markdown("### Queries by ranking position")
+    st.markdown(
+        "> **What this shows**: how many of your queries sit in each ranking bucket each month. "
+        "A shrinking top-3 line means you're losing the queries that actually drive clicks."
+    )
+
+    qpc = db.query_position_counts(t2_cluster)
+    if not qpc.empty:
+        fig_q = go.Figure()
+        bucket_cfg = [
+            ("top_1", "Top 1 (position ≤1.5)", "#0d6efd", 3),
+            ("top_3", "Top 3",                  "#198754", 2.5),
+            ("top_5", "Top 5",                  "#fd7e14", 2),
+            ("top_10", "Top 10",                "#6c757d", 1.5),
+        ]
+        for col, label, color, width in bucket_cfg:
+            est_mask = qpc["is_estimated"] == 1
+            # Real segments
+            real = qpc.copy()
+            real.loc[est_mask, col] = None
+            fig_q.add_trace(go.Scatter(
+                x=real["month"], y=real[col], name=label,
+                line=dict(color=color, width=width), mode="lines+markers",
+                marker=dict(size=5),
+            ))
+            # Estimated segments (dashed)
+            est = qpc.copy()
+            est.loc[~est_mask, col] = None
+            fig_q.add_trace(go.Scatter(
+                x=est["month"], y=est[col], name=f"{label} (est.)",
+                line=dict(color=color, width=width, dash="dot"),
+                mode="lines", showlegend=False, opacity=0.6,
+            ))
+
+        _add_estimated_bands(fig_q, qpc["month"].tolist(), est_months)
+        fig_q.update_layout(
+            height=380, hovermode="x unified",
+            margin=dict(l=0, r=0, t=10, b=0),
+            yaxis_title="Number of queries",
+            legend=dict(orientation="h", y=-0.18),
+        )
+        st.plotly_chart(fig_q, use_container_width=True)
+
+    # ── Page position counts ─────────────────────────────────────────────
+    st.markdown("### Pages by ranking position")
+    st.markdown(
+        "> **What this shows**: how many of your tutorial pages hold top positions. "
+        "Pages falling out of top 5 = fewer entry points for organic traffic."
+    )
+
+    ppc = db.page_position_counts(t2_cluster)
+    if not ppc.empty:
+        fig_p = go.Figure()
+        for col, label, color, width in bucket_cfg:
+            est_mask = ppc["is_estimated"] == 1
+            real = ppc.copy()
+            real.loc[est_mask, col] = None
+            fig_p.add_trace(go.Scatter(
+                x=real["month"], y=real[col], name=label,
+                line=dict(color=color, width=width), mode="lines+markers",
+                marker=dict(size=5),
+            ))
+            est = ppc.copy()
+            est.loc[~est_mask, col] = None
+            fig_p.add_trace(go.Scatter(
+                x=est["month"], y=est[col], name=f"{label} (est.)",
+                line=dict(color=color, width=width, dash="dot"),
+                mode="lines", showlegend=False, opacity=0.6,
+            ))
+
+        _add_estimated_bands(fig_p, ppc["month"].tolist(), est_months)
+        fig_p.update_layout(
+            height=380, hovermode="x unified",
+            margin=dict(l=0, r=0, t=10, b=0),
+            yaxis_title="Number of pages",
+            legend=dict(orientation="h", y=-0.18),
+        )
+        st.plotly_chart(fig_p, use_container_width=True)
+
+    # ── Clicks + Impressions + Divergence ────────────────────────────────
+    st.markdown("### Clicks vs impressions")
+    st.markdown(
+        "> **What to look for**: if impressions stay flat or grow while clicks drop, "
+        "people are seeing your result but not clicking — a strong signal that AI Overviews "
+        "or featured snippets are answering the query above you. "
+        "If both drop together, you're losing visibility entirely (brand displacement)."
+    )
+
+    trend = db.cluster_monthly_trends(t2_cluster)
+    if not trend.empty:
+        fig_ci = make_subplots(specs=[[{"secondary_y": True}]])
+
+        est_mask = trend["is_estimated"] == 1
+
+        for is_est, dash, opacity in [(False, "solid", 1.0), (True, "dot", 0.6)]:
+            mask = est_mask if is_est else ~est_mask
+            subset = trend.copy()
+            subset.loc[~mask, ["clicks", "impressions"]] = None
+
+            fig_ci.add_trace(go.Scatter(
+                x=subset["month"], y=subset["clicks"],
+                name="Clicks" if not is_est else "Clicks (est.)",
+                line=dict(color="#0d6efd", width=2.5, dash=dash),
+                opacity=opacity, showlegend=not is_est,
+                fill="tozeroy" if not is_est else None,
+                fillcolor="rgba(13,110,253,0.08)" if not is_est else None,
+            ), secondary_y=False)
+
+            fig_ci.add_trace(go.Scatter(
+                x=subset["month"], y=subset["impressions"],
+                name="Impressions" if not is_est else "Impressions (est.)",
+                line=dict(color="#6c757d", width=2, dash=dash),
+                opacity=opacity, showlegend=not is_est,
+            ), secondary_y=True)
+
+        _add_estimated_bands(fig_ci, trend["month"].tolist(), est_months)
+        fig_ci.update_layout(
+            height=350, hovermode="x unified",
+            margin=dict(l=0, r=0, t=10, b=0),
+            legend=dict(orientation="h", y=-0.15),
+        )
+        fig_ci.update_yaxes(title_text="Clicks", secondary_y=False)
+        fig_ci.update_yaxes(title_text="Impressions", secondary_y=True)
+        st.plotly_chart(fig_ci, use_container_width=True)
+
+        # Divergence detection
+        real_trend = trend[trend["is_estimated"] == 0]
+        if len(real_trend) >= 3:
+            first_real = real_trend.iloc[0]
+            last_real = real_trend.iloc[-1]
+            imp_change = (last_real["impressions"] - first_real["impressions"]) / first_real["impressions"] * 100 if first_real["impressions"] > 0 else 0
+            click_change = (last_real["clicks"] - first_real["clicks"]) / first_real["clicks"] * 100 if first_real["clicks"] > 0 else 0
+
+            col_d1, col_d2, col_d3 = st.columns(3)
+            col_d1.metric("Impressions change", f"{imp_change:+.0f}%")
+            col_d2.metric("Clicks change", f"{click_change:+.0f}%")
+
+            if imp_change > -10 and click_change < -30:
+                col_d3.error("⚠ Divergence: impressions held but clicks collapsed → likely AIO interception")
+            elif imp_change < -20 and click_change < -20:
+                col_d3.warning("📉 Both declining → losing visibility (displacement or demand drop)")
+            elif imp_change > 10 and click_change > 0:
+                col_d3.success("📈 Growing — both impressions and clicks trending up")
+            else:
+                col_d3.info("→ Mixed signals — monitor next month")
+
+    # ── CTR trend ────────────────────────────────────────────────────────
+    st.markdown("### CTR trend")
+    st.markdown(
+        "> **What this shows**: your click-through rate over time. "
+        "CTR dropping while position holds = the clearest AIO signal. "
+        "CTR dropping with position = displacement."
+    )
+
+    if not trend.empty:
+        fig_ctr = go.Figure()
+        est_mask = trend["is_estimated"] == 1
+
+        for is_est, dash, opacity in [(False, "solid", 1.0), (True, "dot", 0.6)]:
+            mask = est_mask if is_est else ~est_mask
+            subset = trend.copy()
+            subset.loc[~mask, "ctr"] = None
+            fig_ctr.add_trace(go.Scatter(
+                x=subset["month"], y=subset["ctr"],
+                name="CTR %" if not is_est else "CTR % (est.)",
+                line=dict(color="#dc3545", width=2.5, dash=dash),
+                opacity=opacity, showlegend=not is_est,
+                mode="lines+markers" if not is_est else "lines",
+            ))
+
+        _add_estimated_bands(fig_ctr, trend["month"].tolist(), est_months)
+        fig_ctr.update_layout(
+            height=280, hovermode="x unified",
+            margin=dict(l=0, r=0, t=10, b=0),
+            yaxis_title="CTR %",
+            legend=dict(orientation="h", y=-0.2),
+        )
+        st.plotly_chart(fig_ctr, use_container_width=True)
+
+    # ── Average position trend ───────────────────────────────────────────
+    st.markdown("### Average position")
+    st.markdown(
+        "> **What this shows**: the cluster's overall average ranking. "
+        "Lower = better. A rising line means you're drifting off page 1."
+    )
+
+    if not trend.empty:
+        fig_pos = go.Figure()
+        est_mask = trend["is_estimated"] == 1
+
+        for is_est, dash, opacity in [(False, "solid", 1.0), (True, "dot", 0.6)]:
+            mask = est_mask if is_est else ~est_mask
+            subset = trend.copy()
+            subset.loc[~mask, "avg_position"] = None
+            fig_pos.add_trace(go.Scatter(
+                x=subset["month"], y=subset["avg_position"],
+                name="Avg position" if not is_est else "Avg position (est.)",
+                line=dict(color="#198754", width=2.5, dash=dash),
+                opacity=opacity, showlegend=not is_est,
+                mode="lines+markers" if not is_est else "lines",
+            ))
+
+        _add_estimated_bands(fig_pos, trend["month"].tolist(), est_months)
+        fig_pos.update_layout(
+            height=280, hovermode="x unified",
+            margin=dict(l=0, r=0, t=10, b=0),
+            yaxis_title="Average position",
+            yaxis_autorange="reversed",
+            legend=dict(orientation="h", y=-0.2),
+        )
+        st.plotly_chart(fig_pos, use_container_width=True)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 3 — Position filter view (pick bucket, see all clusters)
+# ═══════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.subheader("All clusters by position bucket")
+    st.caption(
+        "Choose a ranking bucket, then see how every cluster's query count in that bucket "
+        "has changed month over month. Good for spotting which clusters are gaining vs losing "
+        "top positions across the board."
+    )
+
+    bucket = st.radio(
+        "Position bucket",
+        ["top_1", "top_3", "top_5"],
+        format_func={"top_1": "Top 1 (≤1.5)", "top_3": "Top 3", "top_5": "Top 5"}.get,
+        horizontal=True,
+        key="t3_bucket",
+    )
+
+    all_data = db.all_clusters_position_summary(bucket)
+    if all_data.empty:
+        st.info("No data.")
+    else:
+        # Line chart: one line per cluster
+        st.markdown(f"#### Queries in {bucket.replace('_', ' ')} — all clusters")
+        top_clusters = (
+            all_data.groupby("cluster")["in_bucket"].sum()
+            .nlargest(12).index.tolist()
+        )
+        plot_data = all_data[all_data["cluster"].isin(top_clusters)]
+
+        fig_all = px.line(
+            plot_data, x="month", y="in_bucket", color="cluster",
+            markers=True,
+            labels={"in_bucket": "Queries in bucket", "month": "", "cluster": "Cluster"},
+        )
+        _add_estimated_bands(fig_all, plot_data["month"].unique().tolist(), est_months)
+        fig_all.update_layout(
+            height=450, hovermode="x unified",
+            margin=dict(l=0, r=0, t=10, b=0),
+            legend=dict(orientation="h", y=-0.15),
+        )
+        st.plotly_chart(fig_all, use_container_width=True)
+
+        # Scorecard table: peak vs current for this bucket
+        st.markdown(f"#### Peak vs current — queries in {bucket.replace('_', ' ')}")
+        peak_months = ["2025-02", "2025-03", "2025-04"]
+        peak_data = all_data[all_data["month"].isin(peak_months)]
+        curr_data_t3 = all_data[all_data["month"] == latest]
+
+        peak_agg = peak_data.groupby("cluster").agg(
+            peak_queries=("in_bucket", "max"),
+            peak_clicks=("clicks", "sum"),
+        ).reset_index()
+
+        curr_agg = curr_data_t3.groupby("cluster").agg(
+            current_queries=("in_bucket", "max"),
+            current_clicks=("clicks", "sum"),
+            current_ctr=("ctr", "mean"),
+            current_pos=("avg_position", "mean"),
+        ).reset_index()
+
+        merged = peak_agg.merge(curr_agg, on="cluster", how="outer").fillna(0)
+        merged["Δ Queries"] = (merged["current_queries"] - merged["peak_queries"]).astype(int)
+        merged["Δ Clicks"] = (merged["current_clicks"] - merged["peak_clicks"]).astype(int)
+
+        display_t3 = merged.rename(columns={
+            "cluster": "Cluster",
+            "peak_queries": f"Peak queries ({bucket.replace('_',' ')})",
+            "current_queries": f"Current queries ({bucket.replace('_',' ')})",
+            "peak_clicks": "Peak clicks",
+            "current_clicks": "Current clicks",
+            "current_ctr": "Current CTR",
+            "current_pos": "Current avg pos",
+        })
+
+        pk_col = f"Peak queries ({bucket.replace('_',' ')})"
+        ck_col = f"Current queries ({bucket.replace('_',' ')})"
+        display_t3[pk_col] = display_t3[pk_col].apply(lambda x: int(x))
+        display_t3[ck_col] = display_t3[ck_col].apply(lambda x: int(x))
+        display_t3["Current CTR"] = display_t3["Current CTR"].apply(lambda x: f"{x:.2f}%")
+        display_t3["Current avg pos"] = display_t3["Current avg pos"].apply(lambda x: f"{x:.1f}")
+        display_t3["Peak clicks"] = display_t3["Peak clicks"].apply(lambda x: f"{int(x):,}")
+        display_t3["Current clicks"] = display_t3["Current clicks"].apply(lambda x: f"{int(x):,}")
+
+        show_cols = [
+            "Cluster",
+            f"Peak queries ({bucket.replace('_',' ')})",
+            f"Current queries ({bucket.replace('_',' ')})",
+            "Δ Queries",
+            "Peak clicks", "Current clicks", "Δ Clicks",
+            "Current CTR", "Current avg pos",
+        ]
+
+        def _delta_q_color(val):
+            try:
+                v = int(val)
+            except Exception:
+                return ""
+            if v >= 0:
+                return "background-color: #d4edda; color: #155724"
+            elif v >= -5:
+                return "background-color: #fff3cd; color: #856404"
             return "background-color: #f8d7da; color: #721c24"
 
         st.dataframe(
-            pd.DataFrame(ret_rows).style.applymap(_ret_color, subset=["Retention"]),
-            use_container_width=True, hide_index=True,
+            display_t3[show_cols]
+            .sort_values("Δ Queries")
+            .style.applymap(_delta_q_color, subset=["Δ Queries"]),
+            use_container_width=True, hide_index=True, height=500,
         )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# TAB 3 — AIO Signature Detector (all clusters summary + drill-down)
-# ─────────────────────────────────────────────────────────────────────────────
-with tab3:
-    st.subheader("AIO Signature Detector")
-    st.caption(
-        "Position stable + CTR collapsed → AI Overview stealing clicks.  "
-        "Both dropped → brand displacement. Select a cluster to see the full trend."
-    )
-
-    peak_period = ("2025-01", "2025-04")
-    curr_period = (latest, latest)
-
-    aio_raw = db.cluster_summary(periods={
-        "Peak Q1'25": peak_period,
-        "Current":    curr_period,
-    })
-
-    if aio_raw.empty:
-        st.info("Not enough data to compute AIO signals.")
-    else:
-        peak_df = aio_raw[aio_raw["period"] == "Peak Q1'25"].set_index("cluster")
-        curr_df = aio_raw[aio_raw["period"] == "Current"].set_index("cluster")
-
-        signal_rows = []
-        for c in curr_df.index:
-            curr = curr_df.loc[c]
-            peak = peak_df.loc[c] if c in peak_df.index else None
-
-            ctr_drop  = 0.0
-            pos_delta = 0.0
-            if peak is not None and peak["ctr"] > 0:
-                ctr_drop = (peak["ctr"] - curr["ctr"]) / peak["ctr"] * 100
-            if peak is not None:
-                pos_delta = curr["avg_position"] - peak["avg_position"]
-
-            if ctr_drop > 40 and pos_delta <= 2:
-                signal = "🔴 AIO"
-            elif ctr_drop > 40 and pos_delta > 2:
-                signal = "🟡 Displaced"
-            elif ctr_drop > 20:
-                signal = "🟠 Declining"
-            else:
-                signal = "🟢 Healthy"
-
-            signal_rows.append({
-                "cluster":      c,
-                "Signal":       signal,
-                "Clicks":       int(curr["clicks"]),
-                "CTR":          f"{curr['ctr']:.2f}%",
-                "CTR Drop":     f"-{ctr_drop:.0f}%" if ctr_drop > 0 else "—",
-                "Position Δ":   f"+{pos_delta:.1f}" if pos_delta > 0 else f"{pos_delta:.1f}",
-            })
-
-        sig_df = (
-            pd.DataFrame(signal_rows)
-            .sort_values("Clicks", ascending=False)
-            .rename(columns={"cluster": "Cluster"})
+        # Clicks trend: all clusters
+        st.markdown("#### Clicks trend — all clusters")
+        fig_clicks = px.line(
+            plot_data, x="month", y="clicks", color="cluster",
+            markers=True,
+            labels={"clicks": "Clicks", "month": "", "cluster": "Cluster"},
         )
-
-        def _sig_color(val):
-            if "AIO"       in str(val): return "background-color: #f8d7da"
-            if "Displaced" in str(val): return "background-color: #fff3cd"
-            if "Declining" in str(val): return "background-color: #fff9e6"
-            return "background-color: #d4edda"
-
-        st.dataframe(
-            sig_df[["Cluster", "Signal", "Clicks", "CTR", "CTR Drop", "Position Δ"]]
-            .style.applymap(_sig_color, subset=["Signal"]),
-            use_container_width=True, hide_index=True,
+        _add_estimated_bands(fig_clicks, plot_data["month"].unique().tolist(), est_months)
+        fig_clicks.update_layout(
+            height=400, hovermode="x unified",
+            margin=dict(l=0, r=0, t=10, b=0),
+            legend=dict(orientation="h", y=-0.15),
         )
+        st.plotly_chart(fig_clicks, use_container_width=True)
 
-        st.divider()
-        st.markdown("**Cluster Deep-Dive**")
-        t3_cluster = st.selectbox("Select cluster", clusters, key="t3_cluster")
-        trend_df   = db.cluster_monthly_trends(t3_cluster)
+        # CTR trend: all clusters
+        st.markdown("#### CTR trend — all clusters")
+        fig_ctr_all = px.line(
+            plot_data, x="month", y="ctr", color="cluster",
+            markers=True,
+            labels={"ctr": "CTR %", "month": "", "cluster": "Cluster"},
+        )
+        _add_estimated_bands(fig_ctr_all, plot_data["month"].unique().tolist(), est_months)
+        fig_ctr_all.update_layout(
+            height=400, hovermode="x unified",
+            margin=dict(l=0, r=0, t=10, b=0),
+            legend=dict(orientation="h", y=-0.15),
+        )
+        st.plotly_chart(fig_ctr_all, use_container_width=True)
 
-        if trend_df.empty:
-            st.info("No monthly data for this cluster.")
-        else:
-            fig = make_subplots(
-                rows=3, cols=1, shared_xaxes=True,
-                subplot_titles=("Clicks", "CTR (%) vs Avg Position", "Impressions"),
-                vertical_spacing=0.08,
-            )
-            fig.add_trace(go.Scatter(
-                x=trend_df["month"], y=trend_df["clicks"],
-                name="Clicks", line=dict(color="#0d6efd", width=2),
-                fill="tozeroy", fillcolor="rgba(13,110,253,0.1)",
-            ), row=1, col=1)
-            fig.add_trace(go.Scatter(
-                x=trend_df["month"], y=trend_df["ctr"],
-                name="CTR %", line=dict(color="#dc3545", width=2),
-            ), row=2, col=1)
-            fig.add_trace(go.Scatter(
-                x=trend_df["month"], y=trend_df["avg_position"],
-                name="Avg Position", line=dict(color="#198754", width=2, dash="dash"),
-            ), row=2, col=1)
-            fig.add_trace(go.Scatter(
-                x=trend_df["month"], y=trend_df["impressions"],
-                name="Impressions", line=dict(color="#6c757d", width=2),
-                fill="tozeroy", fillcolor="rgba(108,117,125,0.1)",
-            ), row=3, col=1)
 
-            fig.update_layout(
-                height=580, hovermode="x unified",
-                margin=dict(l=0, r=0, t=30, b=0),
-                legend=dict(orientation="h", y=-0.05),
-            )
-            fig.update_yaxes(title_text="Clicks",      row=1, col=1)
-            fig.update_yaxes(title_text="CTR %",       row=2, col=1)
-            fig.update_yaxes(title_text="Impressions", row=3, col=1)
-            st.plotly_chart(fig, use_container_width=True)
-
-            latest_row = trend_df.iloc[-1]
-            peak_ctr   = trend_df["ctr"].max()
-            peak_pos   = trend_df["avg_position"].min()
-            ctr_drop_v = (peak_ctr - latest_row["ctr"]) / peak_ctr * 100 if peak_ctr > 0 else 0
-            pos_chg_v  = latest_row["avg_position"] - peak_pos
-
-            d1, d2, d3 = st.columns(3)
-            d1.metric("CTR drop from peak",        f"-{ctr_drop_v:.0f}%",  delta_color="inverse")
-            d2.metric("Position change from peak", f"+{pos_chg_v:.1f}",    delta_color="inverse")
-            d3.metric("Impressions (latest)",      f"{latest_row['impressions']:,.0f}")
-
-            if pos_chg_v <= 2 and ctr_drop_v > 40:
-                st.error("🔴 AIO Interception — position held but CTR collapsed. Content changes won't fix this.")
-            elif pos_chg_v > 4 and ctr_drop_v > 40:
-                st.warning("🟡 Brand displacement + possible AIO — both position and CTR declined.")
-            else:
-                st.success("🟢 Cluster appears healthy or early-stage decline.")
-
-# ─────────────────────────────────────────────────────────────────────────────
-# TAB 4 — Query Deep Dive
-# ─────────────────────────────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 4 — Query deep dive
+# ═══════════════════════════════════════════════════════════════════════════
 with tab4:
-    st.subheader("Query Deep Dive · Per Cluster")
+    st.subheader("Query deep dive")
 
     col_c, col_m = st.columns(2)
     with col_c:
         q_cluster = st.selectbox("Cluster", clusters, key="t4_cluster")
     with col_m:
         q_month = st.selectbox("Month", list(reversed(months)), key="t4_month")
+
+    is_est_month = q_month in est_months
+    if is_est_month:
+        st.warning(f"⚠ {q_month} contains estimated data — numbers are interpolated, not from GSC.")
 
     kw_df = db.keywords_for_cluster(q_cluster, q_month, limit=300)
 
@@ -351,23 +560,21 @@ with tab4:
     else:
         def _assign_signal(row):
             if row["position"] <= 5 and row["ctr"] < 1.0:
-                return "AIO"
+                return "AIO suspect"
             elif row["position"] > 5:
                 return "Displaced"
             return "Healthy"
 
         kw_df["signal"] = kw_df.apply(_assign_signal, axis=1)
 
-        signal_colors = {"Healthy": "#28a745", "AIO": "#dc3545", "Displaced": "#fd7e14"}
+        signal_colors = {"Healthy": "#28a745", "AIO suspect": "#dc3545", "Displaced": "#fd7e14"}
 
         plot_kw = kw_df.copy()
         plot_kw["_size"] = plot_kw["clicks"].clip(lower=1)
 
         fig = px.scatter(
-            plot_kw,
-            x="impressions", y="ctr",
-            size="_size",
-            color="signal",
+            plot_kw, x="impressions", y="ctr",
+            size="_size", color="signal",
             color_discrete_map=signal_colors,
             hover_name="keyword",
             hover_data={"clicks": True, "impressions": True, "position": True, "_size": False},
@@ -377,7 +584,7 @@ with tab4:
         fig.add_hline(y=5.0, line_dash="dot", line_color="green",
                       annotation_text="Strong CTR (5%+)")
         fig.add_hline(y=1.0, line_dash="dot", line_color="red",
-                      annotation_text="Weak CTR (1%)")
+                      annotation_text="Weak CTR (<1%)")
         fig.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0))
         st.plotly_chart(fig, use_container_width=True)
 
@@ -385,18 +592,18 @@ with tab4:
         with col_f:
             signal_filter = st.multiselect(
                 "Filter by signal",
-                ["Healthy", "AIO", "Displaced"],
-                default=["Healthy", "AIO", "Displaced"],
+                ["Healthy", "AIO suspect", "Displaced"],
+                default=["Healthy", "AIO suspect", "Displaced"],
             )
         with col_t:
             st.metric("Total queries", len(kw_df))
 
         disp_kw = kw_df[kw_df["signal"].isin(signal_filter)].copy()
-        disp_kw["ctr"]      = disp_kw["ctr"].apply(lambda x: f"{x:.2f}%")
+        disp_kw["ctr"] = disp_kw["ctr"].apply(lambda x: f"{x:.2f}%")
         disp_kw["position"] = disp_kw["position"].apply(lambda x: f"{x:.1f}")
 
         def _sig_style(val):
-            bg = {"Healthy": "#d4edda", "AIO": "#f8d7da", "Displaced": "#fff3cd"}
+            bg = {"Healthy": "#d4edda", "AIO suspect": "#f8d7da", "Displaced": "#fff3cd"}
             return f"background-color: {bg.get(val, 'white')}"
 
         st.dataframe(
@@ -411,7 +618,45 @@ with tab4:
 
         st.divider()
         st.markdown(
-            "🟢 **Healthy** — specific enough that AIO can't intercept  \n"
-            "🔴 **AIO** — ranks well but CTR collapsed, AI Overview answers above  \n"
-            "🟠 **Displaced** — pushed to page 2+ by brand or competitor"
+            "**Signal legend**\n\n"
+            "- 🟢 **Healthy** — ranking well with good CTR; query is specific enough that AIO can't easily answer it\n"
+            "- 🔴 **AIO suspect** — position ≤5 but CTR below 1%. AI Overview or featured snippet is likely "
+            "answering the query above your result, stealing the click even though you rank well\n"
+            "- 🟠 **Displaced** — pushed below position 5; the original brand, YouTube, or a competitor "
+            "has reclaimed the top spot"
         )
+
+        # Movers
+        if len(months) >= 2:
+            st.divider()
+            st.markdown("**Biggest position movers** (impact = impressions × position change)")
+            prev_month = months[-2] if q_month == latest else months[max(0, months.index(q_month) - 1)]
+            movers = db.keyword_movers(q_cluster, prev_month, q_month, limit=30)
+            if not movers.empty:
+                movers["pos_delta"] = movers["pos_delta"].apply(
+                    lambda x: f"+{x:.1f}" if x > 0 else f"{x:.1f}"
+                )
+                movers["impact_score"] = movers["impact_score"].apply(lambda x: f"{x:,.0f}")
+                st.dataframe(
+                    movers[["keyword", "pos_before", "pos_after", "pos_delta", "impressions", "clicks", "impact_score"]]
+                    .rename(columns={
+                        "keyword": "Keyword", "pos_before": "Pos before",
+                        "pos_after": "Pos after", "pos_delta": "Δ Position",
+                        "impressions": "Impressions", "clicks": "Clicks",
+                        "impact_score": "Impact score",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+
+
+# ── Footer ───────────────────────────────────────────────────────────────
+st.divider()
+est_list = sorted(est_months)
+if est_list:
+    st.caption(
+        f"📊 Data covers {months[0]} to {months[-1]} · "
+        f"Estimated months (dashed lines, shaded): {', '.join(est_list)} · "
+        f"Run Ahrefs backfill to replace estimated data with real GSC numbers"
+    )
+else:
+    st.caption(f"📊 Data covers {months[0]} to {months[-1]} · All data from GSC exports")

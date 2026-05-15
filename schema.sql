@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS pages_monthly (
     ctr REAL DEFAULT 0,
     position REAL DEFAULT 0,
     traffic_value REAL,
+    is_estimated INTEGER DEFAULT 0,
     PRIMARY KEY (page, month)
 );
 
@@ -25,6 +26,7 @@ CREATE TABLE IF NOT EXISTS keywords_monthly (
     impressions INTEGER DEFAULT 0,
     ctr REAL DEFAULT 0,
     position REAL DEFAULT 0,
+    is_estimated INTEGER DEFAULT 0,
     PRIMARY KEY (keyword, month)
 );
 

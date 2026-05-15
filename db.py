@@ -2,7 +2,6 @@
 
 import os
 import sqlite3
-from datetime import date, timedelta
 
 import pandas as pd
 
@@ -26,7 +25,6 @@ def has_data():
 
 
 def available_months():
-    """Returns single-month periods only (excludes range keys like 2025-01_to_2026-05)."""
     conn = get_connection()
     rows = conn.execute(
         "SELECT DISTINCT month FROM pages_monthly WHERE month NOT LIKE '%_to_%' ORDER BY month"
@@ -35,47 +33,29 @@ def available_months():
     return [r[0] for r in rows]
 
 
+def estimated_months():
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT DISTINCT month FROM pages_monthly WHERE is_estimated = 1 ORDER BY month"
+    ).fetchall()
+    conn.close()
+    return set(r[0] for r in rows)
+
+
 def available_clusters():
     conn = get_connection()
     rows = conn.execute(
-        "SELECT DISTINCT cluster FROM pages_monthly WHERE cluster IS NOT NULL ORDER BY cluster"
+        "SELECT DISTINCT cluster FROM pages_monthly "
+        "WHERE cluster IS NOT NULL AND month NOT LIKE '%_to_%' "
+        "ORDER BY cluster"
     ).fetchall()
     conn.close()
     return [r[0] for r in rows]
 
 
-def default_periods():
-    """Return the 4 comparison periods based on available data."""
-    months = available_months()
-    if not months:
-        return {}
-
-    return {
-        "Post-peak Q1'25": ("2025-01", "2025-04"),
-        "Q1'26": ("2026-01", "2026-03"),
-        "3 months ago": _rolling_3mo_ago(months[-1]),
-        "Current": (months[-1], months[-1]),
-    }
-
-
-def _rolling_3mo_ago(latest_month: str) -> tuple[str, str]:
-    year, mo = int(latest_month[:4]), int(latest_month[5:])
-    end_mo = mo - 2
-    end_yr = year
-    if end_mo <= 0:
-        end_mo += 12
-        end_yr -= 1
-    start_mo = end_mo - 2
-    start_yr = end_yr
-    if start_mo <= 0:
-        start_mo += 12
-        start_yr -= 1
-    return (f"{start_yr}-{start_mo:02d}", f"{end_yr}-{end_mo:02d}")
-
-
 def cluster_summary(periods: dict | None = None) -> pd.DataFrame:
     if periods is None:
-        periods = default_periods()
+        periods = _default_periods()
 
     conn = get_connection()
     frames = []
@@ -88,10 +68,12 @@ def cluster_summary(periods: dict | None = None) -> pd.DataFrame:
                            THEN ROUND(SUM(clicks) * 100.0 / SUM(impressions), 2)
                            ELSE 0 END as ctr,
                       ROUND(AVG(position), 1) as avg_position,
-                      COUNT(DISTINCT page) as pages
+                      COUNT(DISTINCT page) as pages,
+                      MAX(is_estimated) as is_estimated
                FROM pages_monthly
                WHERE cluster IS NOT NULL
                  AND month >= ? AND month <= ?
+                 AND month NOT LIKE '%_to_%'
                GROUP BY cluster
                ORDER BY clicks DESC""",
             conn,
@@ -106,77 +88,139 @@ def cluster_summary(periods: dict | None = None) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def _default_periods():
+    months = available_months()
+    if not months:
+        return {}
+    return {
+        "Peak (Feb–Apr '25)": ("2025-02", "2025-04"),
+        months[-3] if len(months) >= 3 else months[0]: (
+            months[-3] if len(months) >= 3 else months[0],
+            months[-3] if len(months) >= 3 else months[0],
+        ),
+        months[-2] if len(months) >= 2 else months[0]: (
+            months[-2] if len(months) >= 2 else months[0],
+            months[-2] if len(months) >= 2 else months[0],
+        ),
+        f"{months[-1]} (current)": (months[-1], months[-1]),
+    }
+
+
 def cluster_monthly_trends(cluster: str | None = None) -> pd.DataFrame:
     conn = get_connection()
-    if cluster:
-        df = pd.read_sql_query(
-            """SELECT month,
-                      SUM(clicks) as clicks,
-                      SUM(impressions) as impressions,
-                      CASE WHEN SUM(impressions) > 0
-                           THEN ROUND(SUM(clicks) * 100.0 / SUM(impressions), 2)
-                           ELSE 0 END as ctr,
-                      ROUND(AVG(position), 1) as avg_position,
-                      COUNT(DISTINCT page) as pages
-               FROM pages_monthly
-               WHERE cluster = ?
-               GROUP BY month
-               ORDER BY month""",
-            conn,
-            params=(cluster,),
-        )
-    else:
-        df = pd.read_sql_query(
-            """SELECT month,
-                      SUM(clicks) as clicks,
-                      SUM(impressions) as impressions,
-                      CASE WHEN SUM(impressions) > 0
-                           THEN ROUND(SUM(clicks) * 100.0 / SUM(impressions), 2)
-                           ELSE 0 END as ctr,
-                      ROUND(AVG(position), 1) as avg_position,
-                      COUNT(DISTINCT page) as pages
-               FROM pages_monthly
-               WHERE cluster IS NOT NULL
-               GROUP BY month
-               ORDER BY month""",
-            conn,
-        )
+    where = "cluster = ?" if cluster else "cluster IS NOT NULL"
+    params = (cluster,) if cluster else ()
+    df = pd.read_sql_query(
+        f"""SELECT month,
+                  SUM(clicks) as clicks,
+                  SUM(impressions) as impressions,
+                  CASE WHEN SUM(impressions) > 0
+                       THEN ROUND(SUM(clicks) * 100.0 / SUM(impressions), 2)
+                       ELSE 0 END as ctr,
+                  ROUND(AVG(position), 1) as avg_position,
+                  COUNT(DISTINCT page) as pages,
+                  MAX(is_estimated) as is_estimated
+           FROM pages_monthly
+           WHERE {where} AND month NOT LIKE '%_to_%'
+           GROUP BY month
+           ORDER BY month""",
+        conn,
+        params=params,
+    )
     conn.close()
     return df
 
 
-def position_distribution(cluster: str, month: str) -> dict:
+def query_position_counts(cluster: str | None = None) -> pd.DataFrame:
     conn = get_connection()
-    row = conn.execute(
-        """SELECT
-               COUNT(DISTINCT CASE WHEN position <= 1.5 THEN keyword END) as top_1,
-               COUNT(DISTINCT CASE WHEN position <= 3.0 THEN keyword END) as top_3,
-               COUNT(DISTINCT CASE WHEN position <= 5.0 THEN keyword END) as top_5,
-               COUNT(DISTINCT CASE WHEN position <= 10.0 THEN keyword END) as top_10,
-               COUNT(DISTINCT keyword) as total
-           FROM keywords_monthly
-           WHERE cluster = ? AND month = ?""",
-        (cluster, month),
-    ).fetchone()
-    conn.close()
-    return dict(row) if row else {}
-
-
-def position_distribution_over_time(cluster: str) -> pd.DataFrame:
-    conn = get_connection()
+    where = "cluster = ?" if cluster else "cluster IS NOT NULL"
+    params = (cluster,) if cluster else ()
     df = pd.read_sql_query(
-        """SELECT month,
+        f"""SELECT month,
                COUNT(DISTINCT CASE WHEN position <= 1.5 THEN keyword END) as top_1,
                COUNT(DISTINCT CASE WHEN position <= 3.0 THEN keyword END) as top_3,
                COUNT(DISTINCT CASE WHEN position <= 5.0 THEN keyword END) as top_5,
                COUNT(DISTINCT CASE WHEN position <= 10.0 THEN keyword END) as top_10,
-               COUNT(DISTINCT keyword) as total
+               COUNT(DISTINCT keyword) as total,
+               MAX(is_estimated) as is_estimated
            FROM keywords_monthly
-           WHERE cluster = ?
+           WHERE {where} AND month NOT LIKE '%_to_%'
            GROUP BY month
            ORDER BY month""",
         conn,
-        params=(cluster,),
+        params=params,
+    )
+    conn.close()
+    return df
+
+
+def page_position_counts(cluster: str | None = None) -> pd.DataFrame:
+    conn = get_connection()
+    where = "cluster = ?" if cluster else "cluster IS NOT NULL"
+    params = (cluster,) if cluster else ()
+    df = pd.read_sql_query(
+        f"""SELECT month,
+               COUNT(DISTINCT CASE WHEN position <= 1.5 THEN page END) as top_1,
+               COUNT(DISTINCT CASE WHEN position <= 3.0 THEN page END) as top_3,
+               COUNT(DISTINCT CASE WHEN position <= 5.0 THEN page END) as top_5,
+               COUNT(DISTINCT CASE WHEN position <= 10.0 THEN page END) as top_10,
+               COUNT(DISTINCT page) as total,
+               MAX(is_estimated) as is_estimated
+           FROM pages_monthly
+           WHERE {where} AND month NOT LIKE '%_to_%'
+           GROUP BY month
+           ORDER BY month""",
+        conn,
+        params=params,
+    )
+    conn.close()
+    return df
+
+
+def all_clusters_position_summary(bucket: str = "top_3") -> pd.DataFrame:
+    pos_threshold = {"top_1": 1.5, "top_3": 3.0, "top_5": 5.0, "top_10": 10.0}[bucket]
+    conn = get_connection()
+    df = pd.read_sql_query(
+        """SELECT month, cluster,
+               COUNT(DISTINCT CASE WHEN position <= ? THEN keyword END) as in_bucket,
+               COUNT(DISTINCT keyword) as total,
+               SUM(clicks) as clicks,
+               SUM(impressions) as impressions,
+               CASE WHEN SUM(impressions) > 0
+                    THEN ROUND(SUM(clicks) * 100.0 / SUM(impressions), 2)
+                    ELSE 0 END as ctr,
+               ROUND(AVG(position), 1) as avg_position,
+               MAX(is_estimated) as is_estimated
+           FROM keywords_monthly
+           WHERE cluster IS NOT NULL AND month NOT LIKE '%_to_%'
+           GROUP BY month, cluster
+           ORDER BY month, cluster""",
+        conn,
+        params=(pos_threshold,),
+    )
+    conn.close()
+    return df
+
+
+def scorecard_data() -> pd.DataFrame:
+    months = available_months()
+    if not months:
+        return pd.DataFrame()
+
+    periods = _default_periods()
+    return cluster_summary(periods)
+
+
+def keywords_for_cluster(cluster: str, month: str, limit: int = 300) -> pd.DataFrame:
+    conn = get_connection()
+    df = pd.read_sql_query(
+        """SELECT keyword, top_url, clicks, impressions, ctr, position
+           FROM keywords_monthly
+           WHERE cluster = ? AND month = ?
+           ORDER BY clicks DESC
+           LIMIT ?""",
+        conn,
+        params=(cluster, month, limit),
     )
     conn.close()
     return df
@@ -201,21 +245,6 @@ def keyword_movers(cluster: str, month_a: str, month_b: str, limit: int = 50) ->
            LIMIT ?""",
         conn,
         params=(cluster, month_a, month_b, limit),
-    )
-    conn.close()
-    return df
-
-
-def keywords_for_cluster(cluster: str, month: str, limit: int = 200) -> pd.DataFrame:
-    conn = get_connection()
-    df = pd.read_sql_query(
-        """SELECT keyword, top_url, clicks, impressions, ctr, position
-           FROM keywords_monthly
-           WHERE cluster = ? AND month = ?
-           ORDER BY clicks DESC
-           LIMIT ?""",
-        conn,
-        params=(cluster, month, limit),
     )
     conn.close()
     return df
