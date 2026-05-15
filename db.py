@@ -26,8 +26,11 @@ def has_data():
 
 
 def available_months():
+    """Returns single-month periods only (excludes range keys like 2025-01_to_2026-05)."""
     conn = get_connection()
-    rows = conn.execute("SELECT DISTINCT month FROM pages_monthly ORDER BY month").fetchall()
+    rows = conn.execute(
+        "SELECT DISTINCT month FROM pages_monthly WHERE month NOT LIKE '%_to_%' ORDER BY month"
+    ).fetchall()
     conn.close()
     return [r[0] for r in rows]
 

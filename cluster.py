@@ -83,7 +83,7 @@ CLUSTER_RULES = {
         "parent_domain": "docusign.com",
     },
     "teams": {
-        "slugs": ["teams-dark", "microsoft-teams"],
+        "slugs": ["teams", "microsoft-teams"],
         "parent_domain": "microsoft.com",
     },
     "calendly": {
@@ -97,6 +97,66 @@ CLUSTER_RULES = {
     "google-meet": {
         "slugs": ["google-meet"],
         "parent_domain": "google.com",
+    },
+    "figma": {
+        "slugs": ["figma"],
+        "parent_domain": "figma.com",
+    },
+    "zoom": {
+        "slugs": ["zoom"],
+        "parent_domain": "zoom.us",
+    },
+    "google-forms": {
+        "slugs": ["google-form"],
+        "parent_domain": "google.com",
+    },
+    "mailchimp": {
+        "slugs": ["mailchimp"],
+        "parent_domain": "mailchimp.com",
+    },
+    "wordpress": {
+        "slugs": ["wordpress"],
+        "parent_domain": "wordpress.com",
+    },
+    "webflow": {
+        "slugs": ["webflow"],
+        "parent_domain": "webflow.com",
+    },
+    "dropbox": {
+        "slugs": ["dropbox"],
+        "parent_domain": "dropbox.com",
+    },
+    "upwork": {
+        "slugs": ["upwork"],
+        "parent_domain": "upwork.com",
+    },
+    "perplexity": {
+        "slugs": ["perplexity"],
+        "parent_domain": "perplexity.ai",
+    },
+    "gemini": {
+        "slugs": ["gemini"],
+        "parent_domain": "gemini.google.com",
+    },
+    "replit": {
+        "slugs": ["replit"],
+        "parent_domain": "replit.com",
+    },
+    "ms-access": {
+        "slugs": ["ms-access", "microsoft-access", "-in-ms-access", "-access-"],
+        "parent_domain": "microsoft.com",
+    },
+    "asana": {
+        "slugs": ["asana"],
+        "parent_domain": "asana.com",
+    },
+    "google-analytics": {
+        "slugs": ["google-analytics"],
+        "parent_domain": "analytics.google.com",
+    },
+    "semrush": {
+        "slugs": ["semrush"],
+        "parent_domain": "semrush.com",
     },
 }
 
