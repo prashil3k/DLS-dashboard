@@ -1,4 +1,4 @@
-"""
+""" 
 Ingests GSC XLSX exports from data/gsc-exports/ into SQLite.
 
 Expected XLSX structure (standard GSC Performance export):
@@ -6,9 +6,9 @@ Expected XLSX structure (standard GSC Performance export):
   Pages tab   : Top pages   | Clicks | Impressions | CTR | Position
   Dates tab   : Date        | Clicks | Impressions | CTR | Position
 
-Period is inferred from the Dates tab (min/max date).
-Single-month files → stored as YYYY-MM in the monthly tables.
-Multi-month files  → stored as YYYY-MM_to_YYYY-MM (used for aggregate views).
+Period is inferred from month names in the filename (e.g. 'March 2026', 'Jan 2025').
+Single-month files  stored as YYYY-MM in the monthly tables.
+Multi-month files   stored as YYYY-MM_to_YYYY-MM (used for aggregate views).
 """
 
 import os
@@ -24,7 +24,7 @@ SCHEMA_PATH  = os.path.join(os.path.dirname(__file__), "schema.sql")
 EXPORTS_DIR  = os.path.join(os.path.dirname(__file__), "data", "gsc-exports")
 
 
-# ── DB init ─────────────────────────────────────────────────────────────────────
+# -- DB init ------------------------------------------------------------------
 
 def init_db(conn):
     with open(SCHEMA_PATH) as f:
@@ -33,10 +33,10 @@ def init_db(conn):
     conn.commit()
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# -- Helpers ------------------------------------------------------------------
 
 def _parse_ctr(val) -> float:
-    """Accept '2.01%', 0.0201, or 2.01 — always returns percentage float."""
+    """Accept '2.01%', 0.0201, or 2.01 - always returns percentage float."""
     if isinstance(val, str):
         return float(val.replace("%", "").strip())
     if isinstance(val, float) and val <= 1.0:
@@ -44,15 +44,15 @@ def _parse_ctr(val) -> float:
     return float(val)
 
 
-def _find_tab(xl: pd.ExcelFile, candidates: list[str]) -> pd.DataFrame | None:
+def _find_tab(xl: pd.ExcelFile, candidates: list) -> pd.DataFrame:
     for name in candidates:
         if name in xl.sheet_names:
             return xl.parse(name)
     return None
 
 
-def _find_col(df: pd.DataFrame, *keywords) -> str | None:
-    """Return first column whose name contains any of the given keywords (case-insensitive)."""
+def _find_col(df: pd.DataFrame, *keywords) -> str:
+    """Return first column whose name contains any keyword (case-insensitive)."""
     for kw in keywords:
         for col in df.columns:
             if kw.lower() in str(col).lower():
@@ -60,46 +60,58 @@ def _find_col(df: pd.DataFrame, *keywords) -> str | None:
     return None
 
 
-def _infer_period(xl: pd.ExcelFile) -> tuple[str, bool]:
-    """
-    Returns (period_str, is_single_month).
-    period_str is either 'YYYY-MM' or 'YYYY-MM_to_YYYY-MM'.
-    Falls back to None if the Dates tab is absent or unreadable.
-    """
+def _infer_period(xl: pd.ExcelFile):
+    """Try Dates tab as fallback period source."""
     df = _find_tab(xl, ["Dates", "dates", "Date", "date"])
     if df is None:
         return None, False
-
     date_col = _find_col(df, "date")
     if date_col is None:
         return None, False
-
     dates = pd.to_datetime(df[date_col], errors="coerce").dropna()
     if dates.empty:
         return None, False
-
     lo, hi = dates.min(), dates.max()
     if lo.year == hi.year and lo.month == hi.month:
         return f"{lo.year}-{lo.month:02d}", True
     return f"{lo.strftime('%Y-%m')}_to_{hi.strftime('%Y-%m')}", False
 
 
-def _period_from_filename(filename: str) -> tuple[str, bool] | tuple[None, bool]:
-    """Try to parse YYYY-MM or YYYY_MM from filename as a fallback."""
-    m = re.search(r"(\d{4})[-_](\d{2})", filename)
-    if m:
-        return f"{m.group(1)}-{m.group(2)}", True
-    return None, False
+_MONTH_MAP = {
+    "jan": "01", "feb": "02", "mar": "03", "apr": "04",
+    "may": "05", "jun": "06", "jul": "07", "aug": "08",
+    "sep": "09", "oct": "10", "nov": "11", "dec": "12",
+}
+_MONTH_RE = (
+    r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may"
+    r"|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?"
+    r"|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+    r"\W+(\d{4})"
+)
 
 
-# ── Loaders ───────────────────────────────────────────────────────────────────
+def _period_from_filename(filename: str):
+    """Parse month-year pairs from filename, e.g. 'March 2026' or 'Jan 2025 - May 2026'."""
+    matches = re.findall(_MONTH_RE, filename, re.IGNORECASE)
+    if not matches:
+        m = re.search(r"(\d{4})[-_](\d{2})", filename)
+        if m:
+            return f"{m.group(1)}-{m.group(2)}", True
+        return None, False
+    periods = [f"{yr}-{_MONTH_MAP[mn.lower()[:3]]}" for mn, yr in matches]
+    if len(periods) == 1:
+        return periods[0], True
+    return f"{periods[0]}_to_{periods[-1]}", False
+
+
+# -- Loaders ------------------------------------------------------------------
 
 def _load_queries(conn, df: pd.DataFrame, month: str) -> int:
-    kw_col   = _find_col(df, "query", "queries", "top quer", "keyword")
-    clk_col  = _find_col(df, "click")
-    imp_col  = _find_col(df, "impression")
-    ctr_col  = _find_col(df, "ctr")
-    pos_col  = _find_col(df, "position")
+    kw_col  = _find_col(df, "query", "queries", "top quer", "keyword")
+    clk_col = _find_col(df, "click")
+    imp_col = _find_col(df, "impression")
+    ctr_col = _find_col(df, "ctr")
+    pos_col = _find_col(df, "position")
 
     missing = [n for n, c in [("keyword", kw_col), ("clicks", clk_col),
                                ("impressions", imp_col), ("ctr", ctr_col),
@@ -137,11 +149,11 @@ def _load_queries(conn, df: pd.DataFrame, month: str) -> int:
 
 
 def _load_pages(conn, df: pd.DataFrame, month: str) -> int:
-    pg_col   = _find_col(df, "page", "top page", "url", "landing")
-    clk_col  = _find_col(df, "click")
-    imp_col  = _find_col(df, "impression")
-    ctr_col  = _find_col(df, "ctr")
-    pos_col  = _find_col(df, "position")
+    pg_col  = _find_col(df, "page", "top page", "url", "landing")
+    clk_col = _find_col(df, "click")
+    imp_col = _find_col(df, "impression")
+    ctr_col = _find_col(df, "ctr")
+    pos_col = _find_col(df, "position")
 
     missing = [n for n, c in [("page", pg_col), ("clicks", clk_col),
                                ("impressions", imp_col), ("ctr", ctr_col),
@@ -180,7 +192,7 @@ def _load_pages(conn, df: pd.DataFrame, month: str) -> int:
     return len(rows)
 
 
-# ── Per-file processor ────────────────────────────────────────────────────────────
+# -- Per-file processor -------------------------------------------------------
 
 def process_file(conn, filepath: str):
     filename = os.path.basename(filepath)
@@ -190,11 +202,11 @@ def process_file(conn, filepath: str):
     xl = pd.ExcelFile(filepath)
     print(f"Tabs: {xl.sheet_names}")
 
-    month, is_single = _infer_period(xl)
+    month, is_single = _period_from_filename(filename)
     if month is None:
-        month, is_single = _period_from_filename(filename)
+        month, is_single = _infer_period(xl)
     if month is None:
-        print("Could not determine period from Dates tab or filename. Skipping.")
+        print("Could not determine period from filename or Dates tab. Skipping.")
         return
 
     kind = "single month" if is_single else "range"
@@ -215,7 +227,7 @@ def process_file(conn, filepath: str):
         print("  Pages tab: not found")
 
 
-# ── Main ─────────────────────────────────────────────────────────────────────────────
+# -- Main ---------------------------------------------------------------------
 
 def main():
     if not os.path.isdir(EXPORTS_DIR):
