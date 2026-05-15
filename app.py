@@ -151,7 +151,7 @@ with tab1:
 
         styled = display_df[cols_show].style
         if "Δ Clicks" in cols_show:
-            styled = styled.applymap(_delta_color, subset=["Δ Clicks"])
+            styled = styled.map(_delta_color, subset=["Δ Clicks"])
         st.dataframe(styled, use_container_width=True, hide_index=True, height=600)
 
         st.divider()
@@ -502,7 +502,7 @@ with tab3:
         st.dataframe(
             display_t3[show_cols]
             .sort_values("Δ Queries")
-            .style.applymap(_delta_q_color, subset=["Δ Queries"]),
+            .style.map(_delta_q_color, subset=["Δ Queries"]),
             use_container_width=True, hide_index=True, height=500,
         )
 
@@ -612,7 +612,7 @@ with tab4:
                 "keyword": "Keyword", "clicks": "Clicks", "impressions": "Impressions",
                 "ctr": "CTR", "position": "Position", "signal": "Signal",
             })
-            .style.applymap(_sig_style, subset=["Signal"]),
+            .style.map(_sig_style, subset=["Signal"]),
             use_container_width=True, hide_index=True,
         )
 
