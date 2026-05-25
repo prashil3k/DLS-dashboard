@@ -1,0 +1,182 @@
+[
+  {
+    "competitor_domain": "microsoft.com",
+    "keywords_common": 881,
+    "keywords_target": 4761,
+    "keywords_competitor": 1332384,
+    "traffic": 44289527,
+    "domain_rating": 96.0,
+    "share": 0.0
+  },
+  {
+    "competitor_domain": "canva.com",
+    "keywords_common": 877,
+    "keywords_target": 4765,
+    "keywords_competitor": 611208,
+    "traffic": 47402080,
+    "domain_rating": 93.0,
+    "share": 0.1
+  },
+  {
+    "competitor_domain": "guideflow.com",
+    "keywords_common": 665,
+    "keywords_target": 4977,
+    "keywords_competitor": 2910,
+    "traffic": 18685,
+    "domain_rating": 60.0,
+    "share": 7.7
+  },
+  {
+    "competitor_domain": "atlassian.com",
+    "keywords_common": 547,
+    "keywords_target": 5095,
+    "keywords_competitor": 101699,
+    "traffic": 1843209,
+    "domain_rating": 92.0,
+    "share": 0.5
+  },
+  {
+    "competitor_domain": "zapier.com",
+    "keywords_common": 423,
+    "keywords_target": 5219,
+    "keywords_competitor": 101974,
+    "traffic": 1597396,
+    "domain_rating": 91.0,
+    "share": 0.3
+  },
+  {
+    "competitor_domain": "scribehow.com",
+    "keywords_common": 258,
+    "keywords_target": 5384,
+    "keywords_competitor": 13685,
+    "traffic": 225620,
+    "domain_rating": 84.0,
+    "share": 1.3
+  },
+  {
+    "competitor_domain": "slack.com",
+    "keywords_common": 246,
+    "keywords_target": 5396,
+    "keywords_competitor": 19111,
+    "traffic": 1339518,
+    "domain_rating": 92.0,
+    "share": 0.9
+  },
+  {
+    "competitor_domain": "notion.com",
+    "keywords_common": 224,
+    "keywords_target": 5418,
+    "keywords_competitor": 23706,
+    "traffic": 675901,
+    "domain_rating": 87.0,
+    "share": 0.7
+  },
+  {
+    "competitor_domain": "salesforce.com",
+    "keywords_common": 206,
+    "keywords_target": 5436,
+    "keywords_competitor": 136767,
+    "traffic": 3286812,
+    "domain_rating": 92.0,
+    "share": 0.1
+  },
+  {
+    "competitor_domain": "mailchimp.com",
+    "keywords_common": 188,
+    "keywords_target": 5454,
+    "keywords_competitor": 46942,
+    "traffic": 817411,
+    "domain_rating": 93.0,
+    "share": 0.3
+  },
+  {
+    "competitor_domain": "figma.com",
+    "keywords_common": 172,
+    "keywords_target": 5470,
+    "keywords_competitor": 111733,
+    "traffic": 2515758,
+    "domain_rating": 92.0,
+    "share": 0.1
+  },
+  {
+    "competitor_domain": "ahrefs.com",
+    "keywords_common": 144,
+    "keywords_target": 5498,
+    "keywords_competitor": 31435,
+    "traffic": 2009178,
+    "domain_rating": 91.0,
+    "share": 0.3
+  },
+  {
+    "competitor_domain": "dropbox.com",
+    "keywords_common": 126,
+    "keywords_target": 5516,
+    "keywords_competitor": 27186,
+    "traffic": 1684733,
+    "domain_rating": 94.0,
+    "share": 0.3
+  },
+  {
+    "competitor_domain": "zoom.com",
+    "keywords_common": 125,
+    "keywords_target": 5517,
+    "keywords_competitor": 39380,
+    "traffic": 4283473,
+    "domain_rating": 92.0,
+    "share": 0.2
+  },
+  {
+    "competitor_domain": "openai.com",
+    "keywords_common": 123,
+    "keywords_target": 5519,
+    "keywords_competitor": 45510,
+    "traffic": 19916624,
+    "domain_rating": 93.0,
+    "share": 0.2
+  },
+  {
+    "competitor_domain": "moz.com",
+    "keywords_common": 76,
+    "keywords_target": 5566,
+    "keywords_competitor": 21315,
+    "traffic": 869715,
+    "domain_rating": 91.0,
+    "share": 0.2
+  },
+  {
+    "competitor_domain": "surveymonkey.com",
+    "keywords_common": 64,
+    "keywords_target": 5578,
+    "keywords_competitor": 23998,
+    "traffic": 421277,
+    "domain_rating": 92.0,
+    "share": 0.2
+  },
+  {
+    "competitor_domain": "asana.com",
+    "keywords_common": 62,
+    "keywords_target": 5580,
+    "keywords_competitor": 47543,
+    "traffic": 1004510,
+    "domain_rating": 91.0,
+    "share": 0.1
+  },
+  {
+    "competitor_domain": "docusign.com",
+    "keywords_common": 26,
+    "keywords_target": 5616,
+    "keywords_competitor": 29196,
+    "traffic": 1977503,
+    "domain_rating": 87.0,
+    "share": 0.0
+  },
+  {
+    "competitor_domain": "groupmgmt.com",
+    "keywords_common": 14,
+    "keywords_target": 5628,
+    "keywords_competitor": 1766,
+    "traffic": 46694,
+    "domain_rating": 51.0,
+    "share": 0.1
+  }
+]

@@ -132,6 +132,60 @@ def ingest_volumes(conn):
     return len(rows)
 
 
+def ingest_competitors(conn):
+    path = os.path.join(DATA_DIR, "organic_competitors.json")
+    if not os.path.exists(path):
+        print("No data/organic_competitors.json found.")
+        return 0
+
+    with open(path) as f:
+        data = json.load(f)
+
+    rows = [
+        (c["competitor_domain"], c.get("keywords_common"), c.get("keywords_target"),
+         c.get("keywords_competitor"), c.get("traffic"), c.get("domain_rating"), c.get("share"))
+        for c in data
+    ]
+    conn.executemany(
+        """INSERT OR REPLACE INTO organic_competitors
+           (competitor_domain, keywords_common, keywords_target, keywords_competitor, traffic, domain_rating, share)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    conn.commit()
+    print(f"  organic_competitors: {len(rows)} rows")
+    return len(rows)
+
+
+def ingest_serp_snapshots(conn):
+    path = os.path.join(DATA_DIR, "serp_snapshots.json")
+    if not os.path.exists(path):
+        print("No data/serp_snapshots.json found.")
+        return 0
+
+    with open(path) as f:
+        data = json.load(f)
+
+    from urllib.parse import urlparse
+    total = 0
+    for keyword, positions in data.items():
+        for p in positions:
+            url = p.get("url")
+            if not url:
+                continue
+            domain = urlparse(url).netloc.replace("www.", "")
+            conn.execute(
+                """INSERT OR REPLACE INTO serp_snapshots
+                   (keyword, position, url, domain, domain_rating, traffic)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (keyword, p["position"], url, domain, p.get("domain_rating"), p.get("traffic")),
+            )
+            total += 1
+    conn.commit()
+    print(f"  serp_snapshots: {total} rows")
+    return total
+
+
 def main():
     print(f"Database: {DB_PATH}")
     conn = sqlite3.connect(DB_PATH)
@@ -148,7 +202,14 @@ def main():
     print("\nIngesting keyword volumes...")
     vol_count = ingest_volumes(conn)
 
-    print(f"\nDone. {page_count} page rows, {kw_count} keyword rows, {vol_count} volumes loaded.")
+    print("\nIngesting competitors...")
+    comp_count = ingest_competitors(conn)
+
+    print("\nIngesting SERP snapshots...")
+    serp_count = ingest_serp_snapshots(conn)
+
+    print(f"\nDone. {page_count} pages, {kw_count} keywords, {vol_count} volumes, "
+          f"{comp_count} competitors, {serp_count} SERP rows loaded.")
     conn.close()
 
 
