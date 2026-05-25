@@ -53,11 +53,12 @@ def _format_month_label(m: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Cluster scorecard",
     "📈 Cluster trends",
     "🔀 Position filter",
     "🔍 Query deep dive",
+    "🎯 Page 2 trap",
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -165,6 +166,56 @@ with tab1:
         )
         fig.update_layout(height=500, margin=dict(l=0, r=0, t=0, b=0))
         st.plotly_chart(fig, use_container_width=True)
+
+        # ── Concentration risk ──────────────────────────────────────────
+        st.divider()
+        st.markdown("**Concentration risk — top 2 pages as % of cluster clicks**")
+        st.caption(
+            "Clusters where 2 pages drive most of the clicks are fragile. "
+            "If those pages lose rank, the entire cluster collapses. "
+            "Anything above 60% is high risk."
+        )
+
+        conc_df = db.concentration_risk(latest)
+        if not conc_df.empty:
+            conc_df["top_page_short"] = conc_df["top_page"].apply(
+                lambda x: x.split("/")[-2] + "/" if pd.notna(x) and "/" in str(x) else str(x)
+            )
+
+            def _conc_color(val):
+                try:
+                    v = float(str(val).replace("%", ""))
+                except Exception:
+                    return ""
+                if v >= 60:
+                    return "background-color: #f8d7da; color: #721c24"
+                elif v >= 40:
+                    return "background-color: #fff3cd; color: #856404"
+                return "background-color: #d4edda; color: #155724"
+
+            conc_display = conc_df[["cluster", "total_clicks", "top2_clicks", "top2_pct"]].copy()
+            conc_display.columns = ["Cluster", "Total clicks", "Top 2 clicks", "Top 2 %"]
+            conc_display["Total clicks"] = conc_display["Total clicks"].apply(lambda x: f"{int(x):,}")
+            conc_display["Top 2 clicks"] = conc_display["Top 2 clicks"].apply(lambda x: f"{int(x):,}")
+            conc_display["Top 2 %"] = conc_display["Top 2 %"].apply(lambda x: f"{x:.1f}%")
+
+            st.dataframe(
+                conc_display.style.map(_conc_color, subset=["Top 2 %"]),
+                use_container_width=True, hide_index=True, height=400,
+            )
+
+            fig_conc = px.bar(
+                conc_df.sort_values("top2_pct", ascending=True),
+                x="top2_pct", y="cluster", orientation="h",
+                color="top2_pct",
+                color_continuous_scale=["#28a745", "#ffc107", "#dc3545"],
+                range_color=[20, 80],
+                labels={"top2_pct": "Top 2 pages %", "cluster": ""},
+            )
+            fig_conc.add_vline(x=60, line_dash="dot", line_color="red",
+                               annotation_text="High risk (60%)")
+            fig_conc.update_layout(height=500, margin=dict(l=0, r=0, t=0, b=0))
+            st.plotly_chart(fig_conc, use_container_width=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -392,6 +443,83 @@ with tab2:
             legend=dict(orientation="h", y=-0.2),
         )
         st.plotly_chart(fig_pos, use_container_width=True)
+
+    # ── Top-3 cohort CTR tracking ───────────────────────────────────────
+    st.markdown("### Top-3 cohort CTR")
+    st.markdown(
+        "> **What this shows**: tracks CTR over time for queries that were *ever* in top 3 for this cluster. "
+        "If these high-value queries lose CTR while holding position, that's the AIO tax in action. "
+        "The 'still in top 3' count shows retention."
+    )
+
+    cohort_df = db.top3_cohort_ctr(t2_cluster)
+    if cohort_df.empty:
+        st.info("No queries were ever in top 3 for this cluster.")
+    else:
+        col_c1, col_c2, col_c3 = st.columns(3)
+        first_row = cohort_df.iloc[0]
+        last_row = cohort_df.iloc[-1]
+        col_c1.metric(
+            "Cohort size",
+            f"{int(last_row['cohort_size'])} queries",
+            help="Queries that were ever in top 3 for this cluster",
+        )
+        col_c2.metric(
+            "Still in top 3",
+            f"{int(last_row['still_top3'])}",
+            delta=f"{int(last_row['still_top3'] - first_row['still_top3']):+d}" if len(cohort_df) > 1 else None,
+        )
+        col_c3.metric(
+            "Cohort CTR",
+            f"{last_row['cohort_ctr']:.2f}%",
+            delta=f"{last_row['cohort_ctr'] - first_row['cohort_ctr']:+.2f}%" if len(cohort_df) > 1 else None,
+        )
+
+        fig_cohort = make_subplots(specs=[[{"secondary_y": True}]])
+
+        est_mask = cohort_df["is_estimated"] == 1
+
+        for is_est, dash, opacity in [(False, "solid", 1.0), (True, "dot", 0.6)]:
+            mask = est_mask if is_est else ~est_mask
+            subset = cohort_df.copy()
+            subset.loc[~mask, ["cohort_ctr", "still_top3"]] = None
+
+            fig_cohort.add_trace(go.Scatter(
+                x=subset["month"], y=subset["cohort_ctr"],
+                name="Cohort CTR %" if not is_est else "Cohort CTR % (est.)",
+                line=dict(color="#dc3545", width=2.5, dash=dash),
+                opacity=opacity, showlegend=not is_est,
+                mode="lines+markers" if not is_est else "lines",
+            ), secondary_y=False)
+
+            fig_cohort.add_trace(go.Scatter(
+                x=subset["month"], y=subset["still_top3"],
+                name="Still in top 3" if not is_est else "Still in top 3 (est.)",
+                line=dict(color="#0d6efd", width=2, dash=dash),
+                opacity=opacity, showlegend=not is_est,
+                mode="lines+markers" if not is_est else "lines",
+            ), secondary_y=True)
+
+        _add_estimated_bands(fig_cohort, cohort_df["month"].tolist(), est_months)
+        fig_cohort.update_layout(
+            height=350, hovermode="x unified",
+            margin=dict(l=0, r=0, t=10, b=0),
+            legend=dict(orientation="h", y=-0.15),
+        )
+        fig_cohort.update_yaxes(title_text="CTR %", secondary_y=False)
+        fig_cohort.update_yaxes(title_text="Queries still in top 3", secondary_y=True)
+        st.plotly_chart(fig_cohort, use_container_width=True)
+
+        # Retention table
+        st.markdown("**Cohort retention by month**")
+        cohort_table = cohort_df[["month", "cohort_size", "still_top3", "cohort_ctr", "clicks", "impressions", "avg_position"]].copy()
+        cohort_table.columns = ["Month", "Cohort size", "Still top 3", "CTR %", "Clicks", "Impressions", "Avg position"]
+        cohort_table["Retention %"] = (cohort_table["Still top 3"] / cohort_table["Cohort size"] * 100).round(1)
+        cohort_table["Clicks"] = cohort_table["Clicks"].apply(lambda x: f"{int(x):,}")
+        cohort_table["Impressions"] = cohort_table["Impressions"].apply(lambda x: f"{int(x):,}")
+        cohort_table["CTR %"] = cohort_table["CTR %"].apply(lambda x: f"{x:.2f}%")
+        cohort_table["Retention %"] = cohort_table["Retention %"].apply(lambda x: f"{x:.1f}%")
+        st.dataframe(cohort_table, use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -647,6 +775,92 @@ with tab4:
                     }),
                     use_container_width=True, hide_index=True,
                 )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 5 — Page 2 trap (opportunity finder)
+# ═══════════════════════════════════════════════════════════════════════════
+with tab5:
+    st.subheader("Page 2 trap — near-miss opportunities")
+    st.caption(
+        "Queries ranking position 5–15 with decent impressions but low CTR. "
+        "These are close to page 1 or on the edge — a small push (content refresh, "
+        "internal link, schema markup) could move them into click-driving positions."
+    )
+
+    col_p2c, col_p2m = st.columns(2)
+    with col_p2c:
+        p2_cluster = st.selectbox(
+            "Cluster", ["All clusters"] + clusters, key="t5_cluster"
+        )
+    with col_p2m:
+        p2_month = st.selectbox("Month", list(reversed(months)), key="t5_month")
+
+    col_pos, col_imp = st.columns(2)
+    with col_pos:
+        p2_pos_range = st.slider(
+            "Position range", 3.0, 20.0, (5.0, 15.0), step=0.5, key="t5_pos"
+        )
+    with col_imp:
+        p2_min_imp = st.number_input(
+            "Min impressions", min_value=0, value=50, step=10, key="t5_imp"
+        )
+
+    cluster_arg = None if p2_cluster == "All clusters" else p2_cluster
+    trap_df = db.page2_trap(
+        cluster_arg, p2_month,
+        pos_min=p2_pos_range[0], pos_max=p2_pos_range[1],
+        min_impressions=p2_min_imp, limit=300,
+    )
+
+    if trap_df.empty:
+        st.info("No queries match these filters.")
+    else:
+        st.metric("Queries in the trap", len(trap_df))
+
+        # Scatter: impressions vs position, sized by clicks
+        plot_trap = trap_df.copy()
+        plot_trap["_size"] = plot_trap["impressions"].clip(lower=10)
+
+        fig_trap = px.scatter(
+            plot_trap, x="position", y="impressions",
+            size="_size", color="cluster",
+            hover_name="keyword",
+            hover_data={"clicks": True, "ctr": True, "position": ":.1f", "_size": False},
+            labels={"position": "Position", "impressions": "Impressions", "cluster": "Cluster"},
+            size_max=35,
+        )
+        fig_trap.add_vline(x=10, line_dash="dot", line_color="gray",
+                           annotation_text="Page 1 cutoff")
+        fig_trap.update_layout(height=450, margin=dict(l=0, r=0, t=0, b=0))
+        st.plotly_chart(fig_trap, use_container_width=True)
+
+        # Table
+        disp_trap = trap_df.copy()
+        disp_trap["ctr"] = disp_trap["ctr"].apply(lambda x: f"{x:.2f}%")
+        disp_trap["position"] = disp_trap["position"].apply(lambda x: f"{x:.1f}")
+        disp_trap["top_url_short"] = disp_trap["top_url"].apply(
+            lambda x: "/".join(str(x).split("/")[-2:]) if pd.notna(x) and "/" in str(x) else str(x)
+        )
+
+        st.dataframe(
+            disp_trap[["keyword", "cluster", "clicks", "impressions", "ctr", "position", "top_url_short"]]
+            .rename(columns={
+                "keyword": "Keyword", "cluster": "Cluster", "clicks": "Clicks",
+                "impressions": "Impressions", "ctr": "CTR", "position": "Position",
+                "top_url_short": "URL",
+            }),
+            use_container_width=True, hide_index=True, height=500,
+        )
+
+        st.divider()
+        st.markdown(
+            "**How to use this**\n\n"
+            "- Queries at position 5–10 with high impressions → quick wins with a content refresh\n"
+            "- Queries at position 10–15 → need a stronger push (new section, internal links, better title)\n"
+            "- Sort by impressions to prioritize highest-opportunity queries first\n"
+            "- Cross-reference with the query deep dive tab to check if AIO is also suppressing CTR"
+        )
 
 
 # ── Footer ───────────────────────────────────────────────────────────────

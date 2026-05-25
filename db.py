@@ -226,6 +226,94 @@ def keywords_for_cluster(cluster: str, month: str, limit: int = 300) -> pd.DataF
     return df
 
 
+def concentration_risk(month: str | None = None) -> pd.DataFrame:
+    if month is None:
+        month = available_months()[-1]
+    conn = get_connection()
+    df = pd.read_sql_query(
+        """WITH ranked AS (
+               SELECT cluster, page, clicks,
+                      ROW_NUMBER() OVER (PARTITION BY cluster ORDER BY clicks DESC) as rn,
+                      SUM(clicks) OVER (PARTITION BY cluster) as cluster_total
+               FROM pages_monthly
+               WHERE cluster IS NOT NULL AND month = ? AND month NOT LIKE '%_to_%'
+           )
+           SELECT cluster,
+                  cluster_total as total_clicks,
+                  SUM(CASE WHEN rn <= 2 THEN clicks ELSE 0 END) as top2_clicks,
+                  CASE WHEN cluster_total > 0
+                       THEN ROUND(SUM(CASE WHEN rn <= 2 THEN clicks ELSE 0 END) * 100.0 / cluster_total, 1)
+                       ELSE 0 END as top2_pct,
+                  MAX(CASE WHEN rn = 1 THEN page END) as top_page,
+                  MAX(CASE WHEN rn = 1 THEN clicks END) as top_page_clicks
+           FROM ranked
+           GROUP BY cluster
+           ORDER BY top2_pct DESC""",
+        conn,
+        params=(month,),
+    )
+    conn.close()
+    return df
+
+
+def page2_trap(cluster: str | None, month: str | None = None,
+               pos_min: float = 5.0, pos_max: float = 15.0,
+               min_impressions: int = 50, limit: int = 200) -> pd.DataFrame:
+    if month is None:
+        month = available_months()[-1]
+    conn = get_connection()
+    where_cluster = "AND cluster = ?" if cluster else "AND cluster IS NOT NULL"
+    params = [month, pos_min, pos_max, min_impressions]
+    if cluster:
+        params.insert(1, cluster)
+    params.append(limit)
+    df = pd.read_sql_query(
+        f"""SELECT keyword, cluster, top_url, clicks, impressions, ctr, position
+            FROM keywords_monthly
+            WHERE month = ? {where_cluster}
+              AND position >= ? AND position <= ?
+              AND impressions >= ?
+              AND month NOT LIKE '%_to_%'
+            ORDER BY impressions DESC
+            LIMIT ?""",
+        conn,
+        params=params,
+    )
+    conn.close()
+    return df
+
+
+def top3_cohort_ctr(cluster: str) -> pd.DataFrame:
+    conn = get_connection()
+    df = pd.read_sql_query(
+        """WITH ever_top3 AS (
+               SELECT DISTINCT keyword
+               FROM keywords_monthly
+               WHERE cluster = ? AND position <= 3.0
+                 AND month NOT LIKE '%_to_%'
+           )
+           SELECT k.month,
+                  COUNT(DISTINCT k.keyword) as cohort_size,
+                  SUM(k.clicks) as clicks,
+                  SUM(k.impressions) as impressions,
+                  CASE WHEN SUM(k.impressions) > 0
+                       THEN ROUND(SUM(k.clicks) * 100.0 / SUM(k.impressions), 2)
+                       ELSE 0 END as cohort_ctr,
+                  ROUND(AVG(k.position), 1) as avg_position,
+                  COUNT(DISTINCT CASE WHEN k.position <= 3.0 THEN k.keyword END) as still_top3,
+                  MAX(k.is_estimated) as is_estimated
+           FROM keywords_monthly k
+           JOIN ever_top3 e ON k.keyword = e.keyword
+           WHERE k.cluster = ? AND k.month NOT LIKE '%_to_%'
+           GROUP BY k.month
+           ORDER BY k.month""",
+        conn,
+        params=(cluster, cluster),
+    )
+    conn.close()
+    return df
+
+
 def keyword_movers(cluster: str, month_a: str, month_b: str, limit: int = 50) -> pd.DataFrame:
     conn = get_connection()
     df = pd.read_sql_query(
