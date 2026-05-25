@@ -380,3 +380,75 @@ def keyword_movers(cluster: str, month_a: str, month_b: str, limit: int = 50) ->
     )
     conn.close()
     return df
+
+
+def keywords_with_volume(cluster: str | None = None, month: str | None = None,
+                         limit: int = 200) -> pd.DataFrame:
+    """Keywords enriched with search volume, sorted by volume descending."""
+    if month is None:
+        month = available_months()[-1]
+    conn = get_connection()
+    where_cluster = "AND k.cluster = ?" if cluster else "AND k.cluster IS NOT NULL"
+    params = [month]
+    if cluster:
+        params.append(cluster)
+    params.append(limit)
+    df = pd.read_sql_query(
+        f"""SELECT k.keyword, k.cluster, k.top_url, k.clicks, k.impressions,
+                   k.ctr, k.position,
+                   COALESCE(v.volume, 0) as search_volume,
+                   v.cpc, v.difficulty,
+                   CASE WHEN k.impressions > 0 AND v.volume > 0
+                        THEN ROUND(k.impressions * 100.0 / (v.volume * 30), 1)
+                        ELSE NULL END as visibility_pct
+            FROM keywords_monthly k
+            LEFT JOIN keyword_volumes v ON k.keyword = v.keyword
+            WHERE k.month = ? {where_cluster}
+              AND k.month NOT LIKE '%_to_%'
+            ORDER BY COALESCE(v.volume, 0) DESC
+            LIMIT ?""",
+        conn,
+        params=params,
+    )
+    conn.close()
+    return df
+
+
+def volume_coverage_stats() -> dict:
+    """How many keywords have volume data."""
+    conn = get_connection()
+    row = conn.execute("""
+        SELECT COUNT(DISTINCT k.keyword) as total_kw,
+               COUNT(DISTINCT CASE WHEN v.volume IS NOT NULL THEN k.keyword END) as with_volume,
+               COUNT(DISTINCT CASE WHEN v.volume > 1000 THEN k.keyword END) as high_volume
+        FROM keywords_monthly k
+        LEFT JOIN keyword_volumes v ON k.keyword = v.keyword
+        WHERE k.month NOT LIKE '%_to_%'
+    """).fetchone()
+    conn.close()
+    return {"total": row[0], "with_volume": row[1], "high_volume": row[2]}
+
+
+def top_opportunity_keywords(month: str | None = None, min_volume: int = 100,
+                             pos_min: float = 4.0, pos_max: float = 20.0,
+                             limit: int = 50) -> pd.DataFrame:
+    """High-volume keywords where we rank poorly - biggest improvement opportunities."""
+    if month is None:
+        month = available_months()[-1]
+    conn = get_connection()
+    df = pd.read_sql_query(
+        """SELECT k.keyword, k.cluster, k.top_url, k.position, k.impressions, k.clicks,
+                  v.volume as search_volume, v.difficulty,
+                  ROUND(v.volume * (1.0 / k.position), 0) as opportunity_score
+           FROM keywords_monthly k
+           JOIN keyword_volumes v ON k.keyword = v.keyword
+           WHERE k.month = ? AND k.month NOT LIKE '%_to_%'
+             AND v.volume >= ?
+             AND k.position >= ? AND k.position <= ?
+           ORDER BY opportunity_score DESC
+           LIMIT ?""",
+        conn,
+        params=(month, min_volume, pos_min, pos_max, limit),
+    )
+    conn.close()
+    return df

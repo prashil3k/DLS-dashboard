@@ -33,6 +33,16 @@ CREATE TABLE IF NOT EXISTS keywords_monthly (
 CREATE INDEX IF NOT EXISTS idx_km_cluster_month ON keywords_monthly(cluster, month);
 CREATE INDEX IF NOT EXISTS idx_km_month ON keywords_monthly(month);
 
+CREATE TABLE IF NOT EXISTS keyword_volumes (
+    keyword TEXT PRIMARY KEY,
+    volume INTEGER,
+    cpc INTEGER,
+    difficulty INTEGER,
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_kv_volume ON keyword_volumes(volume DESC);
+
 CREATE TABLE IF NOT EXISTS cluster_config (
     cluster TEXT PRIMARY KEY,
     url_patterns TEXT NOT NULL,

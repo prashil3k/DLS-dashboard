@@ -11,7 +11,7 @@ st.set_page_config(page_title="Storylane SEO Dashboard", layout="wide", page_ico
 st.title("Storylane · Demo-led SEO dashboard")
 
 # DB version gate: if the on-disk DB is stale, nuke and rebuild from repo copy
-DB_VERSION = 2  # bump this to force a rebuild on Streamlit Cloud
+DB_VERSION = 3  # bump this to force a rebuild on Streamlit Cloud
 db.ensure_db_version(DB_VERSION)
 
 if not db.has_data():
@@ -54,12 +54,13 @@ def _format_month_label(m: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Cluster scorecard",
     "📈 Cluster trends",
     "🔀 Position filter",
     "🔍 Query deep dive",
     "🎯 Page 2 trap",
+    "💎 Opportunities",
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -864,14 +865,132 @@ with tab5:
         )
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 6 — Opportunities (volume-enriched)
+# ═══════════════════════════════════════════════════════════════════════════
+with tab6:
+    st.subheader("Keyword opportunities — ranked by search volume")
+
+    vol_stats = db.volume_coverage_stats()
+    st.caption(
+        f"Volume data: {vol_stats['with_volume']}/{vol_stats['total']} keywords enriched "
+        f"({vol_stats['high_volume']} with volume > 1K). "
+        "Opportunity score = volume ÷ current position (higher = bigger upside)."
+    )
+
+    col_o1, col_o2 = st.columns(2)
+    with col_o1:
+        opp_month = st.selectbox("Month", list(reversed(months)), key="t6_month")
+    with col_o2:
+        opp_min_vol = st.number_input(
+            "Min search volume", min_value=0, value=100, step=50, key="t6_vol"
+        )
+
+    col_o3, col_o4 = st.columns(2)
+    with col_o3:
+        opp_pos_range = st.slider(
+            "Position range", 1.0, 30.0, (4.0, 20.0), step=0.5, key="t6_pos"
+        )
+    with col_o4:
+        opp_limit = st.number_input(
+            "Max results", min_value=10, value=50, step=10, key="t6_limit"
+        )
+
+    opp_df = db.top_opportunity_keywords(
+        month=opp_month, min_volume=opp_min_vol,
+        pos_min=opp_pos_range[0], pos_max=opp_pos_range[1],
+        limit=opp_limit,
+    )
+
+    if opp_df.empty:
+        st.info("No opportunities match these filters. Try lowering the min volume or widening the position range.")
+    else:
+        col_m1, col_m2, col_m3 = st.columns(3)
+        col_m1.metric("Opportunities found", len(opp_df))
+        col_m2.metric("Total search volume", f"{opp_df['search_volume'].sum():,.0f}")
+        col_m3.metric("Avg position", f"{opp_df['position'].mean():.1f}")
+
+        # Bubble chart: volume vs position, sized by opportunity score
+        fig_opp = px.scatter(
+            opp_df, x="position", y="search_volume",
+            size="opportunity_score", color="cluster",
+            hover_name="keyword",
+            hover_data={"clicks": True, "impressions": True, "difficulty": True,
+                        "opportunity_score": ":.0f", "search_volume": ":,"},
+            labels={"position": "Current position", "search_volume": "Monthly search volume",
+                    "cluster": "Cluster"},
+            size_max=40,
+        )
+        fig_opp.update_layout(
+            height=500, margin=dict(l=0, r=0, t=30, b=0),
+            yaxis_type="log",
+        )
+        fig_opp.add_vline(x=10, line_dash="dot", line_color="gray",
+                          annotation_text="Page 1 cutoff")
+        st.plotly_chart(fig_opp, use_container_width=True)
+
+        # Table
+        disp_opp = opp_df.copy()
+        disp_opp["position"] = disp_opp["position"].apply(lambda x: f"{x:.1f}")
+        disp_opp["search_volume"] = disp_opp["search_volume"].apply(lambda x: f"{x:,}")
+        disp_opp["opportunity_score"] = disp_opp["opportunity_score"].apply(lambda x: f"{x:,.0f}")
+        disp_opp["url_short"] = disp_opp["top_url"].apply(
+            lambda x: "/".join(str(x).split("/")[-2:]) if pd.notna(x) and "/" in str(x) else str(x)
+        )
+
+        st.dataframe(
+            disp_opp[["keyword", "cluster", "search_volume", "position", "difficulty",
+                       "clicks", "impressions", "opportunity_score", "url_short"]]
+            .rename(columns={
+                "keyword": "Keyword", "cluster": "Cluster", "search_volume": "Volume",
+                "position": "Position", "difficulty": "KD", "clicks": "Clicks",
+                "impressions": "Impressions", "opportunity_score": "Opp. score",
+                "url_short": "URL",
+            }),
+            use_container_width=True, hide_index=True, height=500,
+        )
+
+        st.divider()
+        st.markdown(
+            "**How to use this**\n\n"
+            "- **High volume + position 4–10**: Quick wins — already on page 1, improve content to climb\n"
+            "- **High volume + position 11–20**: Need a bigger push — content refresh, internal links, schema\n"
+            "- **Low difficulty + high volume**: Best ROI — easier to rank for with less effort\n"
+            "- Sort by opportunity score to find the highest-impact keywords to prioritize"
+        )
+
+    # Volume-enriched keyword table
+    st.divider()
+    st.subheader("All keywords with search volume")
+
+    vol_cluster = st.selectbox(
+        "Filter by cluster", ["All clusters"] + clusters, key="t6_vol_cluster"
+    )
+    vol_cluster_arg = None if vol_cluster == "All clusters" else vol_cluster
+    vol_kw_df = db.keywords_with_volume(cluster=vol_cluster_arg, month=opp_month, limit=500)
+
+    if not vol_kw_df.empty:
+        disp_vol = vol_kw_df.copy()
+        disp_vol["position"] = disp_vol["position"].apply(lambda x: f"{x:.1f}")
+        disp_vol["ctr"] = disp_vol["ctr"].apply(lambda x: f"{x:.2f}%")
+        disp_vol["search_volume"] = disp_vol["search_volume"].apply(lambda x: f"{x:,}")
+
+        st.dataframe(
+            disp_vol[["keyword", "cluster", "search_volume", "position", "clicks",
+                       "impressions", "ctr"]]
+            .rename(columns={
+                "keyword": "Keyword", "cluster": "Cluster", "search_volume": "Volume",
+                "position": "Position", "clicks": "Clicks", "impressions": "Impressions",
+                "ctr": "CTR",
+            }),
+            use_container_width=True, hide_index=True, height=400,
+        )
+
+
 # ── Footer ───────────────────────────────────────────────────────────────
 st.divider()
-est_list = sorted(est_months)
-if est_list:
-    st.caption(
-        f"📊 Data covers {months[0]} to {months[-1]} · "
-        f"Estimated months (dashed lines, shaded): {', '.join(est_list)} · "
-        f"Run Ahrefs backfill to replace estimated data with real GSC numbers"
-    )
-else:
-    st.caption(f"📊 Data covers {months[0]} to {months[-1]} · All data from GSC exports")
+vol_stats = db.volume_coverage_stats()
+st.caption(
+    f"📊 Data covers {months[0]} to {months[-1]} · All data from GSC exports · "
+    f"{vol_stats['with_volume']} keywords enriched with search volume"
+)

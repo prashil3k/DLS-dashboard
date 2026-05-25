@@ -113,6 +113,25 @@ def ingest_keywords(conn):
     return total
 
 
+def ingest_volumes(conn):
+    vol_path = os.path.join(DATA_DIR, "keyword_volumes.json")
+    if not os.path.exists(vol_path):
+        print("No data/keyword_volumes.json found.")
+        return 0
+
+    with open(vol_path) as f:
+        data = json.load(f)
+
+    rows = [(kw["keyword"], kw.get("volume"), kw.get("cpc"), kw.get("difficulty")) for kw in data]
+    conn.executemany(
+        "INSERT OR REPLACE INTO keyword_volumes (keyword, volume, cpc, difficulty) VALUES (?, ?, ?, ?)",
+        rows,
+    )
+    conn.commit()
+    print(f"  keyword_volumes: {len(rows)} rows")
+    return len(rows)
+
+
 def main():
     print(f"Database: {DB_PATH}")
     conn = sqlite3.connect(DB_PATH)
@@ -126,7 +145,10 @@ def main():
     print("\nIngesting keywords...")
     kw_count = ingest_keywords(conn)
 
-    print(f"\nDone. {page_count} page rows, {kw_count} keyword rows loaded.")
+    print("\nIngesting keyword volumes...")
+    vol_count = ingest_volumes(conn)
+
+    print(f"\nDone. {page_count} page rows, {kw_count} keyword rows, {vol_count} volumes loaded.")
     conn.close()
 
 
