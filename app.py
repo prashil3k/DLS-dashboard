@@ -14,12 +14,15 @@ if not db.has_data():
     with st.spinner("Building database from GSC exports..."):
         import ingest_gsc
         ingest_gsc.main()
-        if os.path.exists(os.path.join(os.path.dirname(__file__), "generate_estimated.py")):
-            import generate_estimated
-            generate_estimated.main()
+        # Also ingest Ahrefs MCP backfill data if available
+        import ingest
+        ingest.main()
     if not db.has_data():
         st.warning("No data. Add XLSX exports to `data/gsc-exports/` and redeploy.")
         st.stop()
+
+# Purge any leftover estimated rows — real backfill data is now in place
+db.purge_estimated_rows()
 
 months = db.available_months()
 clusters = db.available_clusters()

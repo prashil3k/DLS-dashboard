@@ -15,6 +15,21 @@ def get_connection():
     return conn
 
 
+def purge_estimated_rows():
+    """Remove all estimated rows from both tables — real backfill data replaces them."""
+    conn = get_connection()
+    c1 = conn.execute("DELETE FROM pages_monthly WHERE is_estimated = 1").rowcount
+    c2 = conn.execute("DELETE FROM keywords_monthly WHERE is_estimated = 1").rowcount
+    # Also remove spurious aggregate month entries
+    c3 = conn.execute("DELETE FROM pages_monthly WHERE month LIKE '%_to_%'").rowcount
+    c4 = conn.execute("DELETE FROM keywords_monthly WHERE month LIKE '%_to_%'").rowcount
+    conn.commit()
+    conn.close()
+    if c1 + c2 + c3 + c4 > 0:
+        import streamlit as st
+        st.toast(f"Purged {c1+c2} estimated rows and {c3+c4} aggregate rows")
+
+
 def has_data():
     if not os.path.exists(DB_PATH):
         return False
