@@ -15,6 +15,35 @@ def get_connection():
     return conn
 
 
+def ensure_db_version(expected: int):
+    """If the on-disk DB doesn't match the expected version, delete it so it gets rebuilt.
+
+    On Streamlit Cloud the cloned repo includes a clean DB, but if a previous deploy
+    already modified it (ingest_gsc + generate_estimated), git pull won't overwrite.
+    This forces a clean slate when we bump the version.
+    """
+    version_file = DB_PATH + ".version"
+    current = 0
+    if os.path.exists(version_file):
+        try:
+            current = int(open(version_file).read().strip())
+        except (ValueError, OSError):
+            current = 0
+
+    if current < expected:
+        # Delete the stale DB so has_data() returns False and the app rebuilds
+        if os.path.exists(DB_PATH):
+            os.remove(DB_PATH)
+        # Also remove WAL/SHM files
+        for ext in (".db-wal", ".db-shm"):
+            p = DB_PATH.replace(".db", ext)
+            if os.path.exists(p):
+                os.remove(p)
+        # Write the new version marker
+        with open(version_file, "w") as f:
+            f.write(str(expected))
+
+
 def purge_estimated_rows():
     """Remove all estimated rows from both tables — real backfill data replaces them."""
     conn = get_connection()

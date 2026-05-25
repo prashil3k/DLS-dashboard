@@ -10,19 +10,17 @@ import db
 st.set_page_config(page_title="Storylane SEO Dashboard", layout="wide", page_icon="📊")
 st.title("Storylane · Demo-led SEO dashboard")
 
+# DB version gate: if the on-disk DB is stale, nuke and rebuild from repo copy
+DB_VERSION = 2  # bump this to force a rebuild on Streamlit Cloud
+db.ensure_db_version(DB_VERSION)
+
 if not db.has_data():
-    with st.spinner("Building database from GSC exports..."):
-        import ingest_gsc
-        ingest_gsc.main()
-        # Also ingest Ahrefs MCP backfill data if available
+    with st.spinner("Building database from JSON backfill data..."):
         import ingest
         ingest.main()
     if not db.has_data():
-        st.warning("No data. Add XLSX exports to `data/gsc-exports/` and redeploy.")
+        st.warning("No data found. Check data/pages/ and data/keywords/ directories.")
         st.stop()
-
-# Purge any leftover estimated rows — real backfill data is now in place
-db.purge_estimated_rows()
 
 months = db.available_months()
 clusters = db.available_clusters()
