@@ -19,7 +19,7 @@ def ensure_db_version(expected: int):
     """If the on-disk DB doesn't match the expected version, delete it so it gets rebuilt.
 
     On Streamlit Cloud the cloned repo includes a clean DB, but if a previous deploy
-    already modified it (ingest_gsc + generate_estimated), git pull won't overwrite.
+    already modified it (ingest_gsc), git pull won't overwrite.
     This forces a clean slate when we bump the version.
     """
     version_file = DB_PATH + ".version"

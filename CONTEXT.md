@@ -16,7 +16,7 @@ connected. In that session:
 - 6 months of page data were pulled but the session hit its API rate limit
   **before any JSON files were saved to disk**
 - Infrastructure files (`schema.sql`, `ingest.py`, `cluster.py`, `db.py`,
-  `save_json.py`, `app.py`) were created in that session
+  `app.py`) were created in that session
 - Those files were pushed to the user's local folder:
   `/Users/prashil3k/Documents/Claude Code/DLS performance dashboard`
 
@@ -111,35 +111,58 @@ works correctly with what's loaded.
 
 ## What the Next Session Should Pick Up
 
-### Immediate — already designed, not yet built
-1. **Concentration risk metric** — top 2 pages as % of cluster total clicks
-   (the "Grok problem": 2 pages = ~50% of cluster clicks, high fragility)
-2. **Page 2 trap view** — queries with impressions > threshold and position
-   5–15, low CTR. These are close to page 1 and worth targeting. Jira is the
-   prime example per user notes.
-3. **Top-3 cohort CTR tracking** — track CTR specifically for queries that
-   were ever in top 3 positions, not overall average CTR
+### BLOCKING — Data quality fix
+The Ahrefs MCP caps at 100 rows per month. Only 6 months have full GSC XLSX
+exports (1,000 rows): Feb–Apr 2025, Feb–Apr 2026. The other 12 months have
+just 100 pages + 100 keywords each — too thin for reliable trend analysis.
 
-### Needs Ahrefs MCP (backlog)
-4. **"Lost to" buckets** — who outranks you per query:
-   - Lost to AIO (AI Overview)
-   - Lost to parent domain + YouTube
-   - Lost to unbranded / Reddit / forums
-   Requires knowing what's ranking above you — GSC alone can't provide this.
-   This is the highest-value missing feature.
-5. **Search volume patching** — add monthly search volume per keyword.
-   Also requires Ahrefs.
+**Fix:** Manually export remaining months from GSC (one XLSX per month for
+May 2025 through Jan 2026, plus Dec 2024, Jan 2025, May 2026), drop in
+`data/gsc-exports/`, run `python ingest_gsc.py`. This overwrites the thin
+Ahrefs rows with complete data.
+
+### Built (previously listed as pending)
+- ~~Concentration risk metric~~ → done (Tab 1 scorecard + `db.concentration_risk()`)
+- ~~Page 2 trap view~~ → done (Tab 5)
+- ~~Top-3 cohort CTR tracking~~ → done (`db.top3_cohort_ctr()`)
+- ~~"Lost to" buckets~~ → done (Tab 7, organic competitors + SERP snapshots)
+- ~~Search volume patching~~ → done (Tab 6 Opportunities, 497 keywords with volume)
+
+### Pending — next priorities
+1. **Conversational query layer** — query dashboard data through Claude Code
+   directly (NOT Anthropic API). In any new chat, Claude Code connects to the
+   SQLite DB, runs SQL, spots patterns, discusses findings interactively.
+   Different from the auto-diagnostic layer (#3) — this is human-driven Q&A.
+   Needs: a way for any new session to know the DB path, schema, and cluster
+   context. Could be a CLAUDE.md in the project, a skill, or a memory entry.
+
+2. **Tutorial publish metadata (INPUT data layer)** — the dashboard currently
+   tracks only OUTCOMES (clicks, impressions, positions). Adding INPUT data:
+   when each tutorial went live, its category, cluster assignment timing.
+   12,000+ tutorial pages — phase 1 and phase 2 have names, upload dates,
+   categories. Goal: correlate input timing with outcome changes. Did a batch
+   of Canva tutorials going live in month X cause traffic change in month Y?
+   Did a cluster's traffic start before or after pages were indexed? Transforms
+   "what happened" into "did what we did cause what happened."
+   Source: Webflow CMS export or API.
+   Needs: `tutorial_metadata` table (url, title, category, publish_date,
+   cluster), ingest pipeline, dashboard views overlaying publish events on
+   trend charts.
+
+3. **Auto-diagnostic layer** (parked) — the "doctor" that proactively surfaces
+   insights without being asked. Depends on #1 and #2 being in place.
+
+4. **Expand SERP snapshots** — currently 9 keywords, 107 results. Target 50+
+   keywords for richer "Lost to" analysis.
+
+5. **Phase 2 indexation investigation** — Claude and Gemini clusters have
+   significant non-indexed pages.
 
 ### When Ahrefs MCP is reconnected
-The original plan was to use these tools (confirmed working, 0 unit cost):
-- `ahrefs_gsc_pages` → article-level snapshots per month
-- `ahrefs_gsc_keywords` → keyword-level detail per cluster
-- `ahrefs_gsc_keyword_history` → time-series trends
-
-Backfill target: 17 months (Dec 2024 → Apr 2026), month by month.
-Save format: `data/pages/pages_YYYY-MM.json` and `data/keywords/keywords_YYYY-MM.json`
-Then run `python ingest.py` (the original JSON-based ingester, separate from
-`ingest_gsc.py` which handles XLSX).
+GSC tools are free (0 units per row). Useful for:
+- Supplementing manual exports if months are missed
+- SERP snapshot expansion (costs units but high value)
+- keyword-explorer for volume patching on new keywords
 
 ---
 
@@ -179,4 +202,6 @@ python ingest_gsc.py
 streamlit run app.py
 ```
 
-The `.db` file is gitignored — it must be built locally from the exports.
+The `.db` file is committed to the repo (auto-rebuilt on Streamlit Cloud via
+`DB_VERSION` gate in `app.py`). To rebuild locally: delete `storylane_seo.db`
+and restart the Streamlit app, or run `python ingest.py` / `python ingest_gsc.py`.
