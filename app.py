@@ -11,7 +11,7 @@ st.set_page_config(page_title="Storylane SEO Dashboard", layout="wide", page_ico
 st.title("Storylane · Demo-led SEO dashboard")
 
 # DB version gate: if the on-disk DB is stale, nuke and rebuild from repo copy
-DB_VERSION = 3  # bump this to force a rebuild on Streamlit Cloud
+DB_VERSION = 4  # bump this to force a rebuild on Streamlit Cloud
 db.ensure_db_version(DB_VERSION)
 
 if not db.has_data():
@@ -54,13 +54,14 @@ def _format_month_label(m: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📊 Cluster scorecard",
     "📈 Cluster trends",
     "🔀 Position filter",
     "🔍 Query deep dive",
     "🎯 Page 2 trap",
     "💎 Opportunities",
+    "⚔️ Lost to",
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -985,6 +986,168 @@ with tab6:
             }),
             use_container_width=True, hide_index=True, height=400,
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 7 — Lost to (competitor analysis)
+# ═══════════════════════════════════════════════════════════════════════════
+with tab7:
+    st.subheader("Lost to — who's outranking Storylane")
+    st.caption(
+        "Competitor analysis based on organic keyword overlap and SERP position data. "
+        "Shows which domains consistently rank above Storylane tutorials."
+    )
+
+    # ── Organic competitors overview ──
+    comp_df = db.organic_competitors_summary()
+    if not comp_df.empty:
+        st.markdown("#### Organic competitors (by shared keywords)")
+
+        fig_comp = px.bar(
+            comp_df.head(15),
+            x="keywords_common", y="competitor_domain",
+            orientation="h",
+            color="domain_rating",
+            color_continuous_scale="RdYlGn",
+            hover_data={"traffic": ":,", "share": ":.1f", "domain_rating": ":.0f"},
+            labels={"keywords_common": "Shared keywords", "competitor_domain": "",
+                    "domain_rating": "DR"},
+        )
+        fig_comp.update_layout(
+            height=400, margin=dict(l=0, r=0, t=10, b=0),
+            yaxis=dict(autorange="reversed"),
+        )
+        st.plotly_chart(fig_comp, use_container_width=True)
+
+        disp_comp = comp_df.copy()
+        disp_comp["traffic"] = disp_comp["traffic"].apply(lambda x: f"{x:,}")
+        disp_comp["share"] = disp_comp["share"].apply(lambda x: f"{x:.1f}%")
+        disp_comp["domain_rating"] = disp_comp["domain_rating"].apply(lambda x: f"{x:.0f}")
+        st.dataframe(
+            disp_comp.rename(columns={
+                "competitor_domain": "Domain", "keywords_common": "Shared KWs",
+                "keywords_competitor": "Their total KWs", "traffic": "Their traffic",
+                "domain_rating": "DR", "share": "KW share",
+            }),
+            use_container_width=True, hide_index=True,
+        )
+
+    # ── SERP domain breakdown ──
+    st.divider()
+    st.markdown("#### SERP competitors (who appears in top 10 for our keywords)")
+
+    serp_domains = db.serp_domain_analysis()
+    if not serp_domains.empty:
+        fig_serp = px.scatter(
+            serp_domains,
+            x="avg_position", y="keywords_covered",
+            size="appearances", color="avg_dr",
+            hover_name="domain",
+            hover_data={"top3_count": True, "page1_count": True, "avg_dr": ":.0f"},
+            color_continuous_scale="RdYlGn",
+            labels={"avg_position": "Avg SERP position", "keywords_covered": "Keywords covered",
+                    "avg_dr": "Avg DR"},
+            size_max=40,
+        )
+        fig_serp.update_layout(height=400, margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig_serp, use_container_width=True)
+
+        st.dataframe(
+            serp_domains.rename(columns={
+                "domain": "Domain", "appearances": "Appearances",
+                "keywords_covered": "Keywords", "avg_position": "Avg pos",
+                "top3_count": "Top 3", "page1_count": "Page 1", "avg_dr": "DR",
+            }),
+            use_container_width=True, hide_index=True,
+        )
+
+    # ── "Lost to" detail ──
+    st.divider()
+    st.markdown("#### Who ranks above us (per keyword)")
+
+    lost_df = db.lost_to_summary()
+    if not lost_df.empty:
+        col_l1, col_l2 = st.columns(2)
+        col_l1.metric("Keywords with competitors above us", lost_df["keyword"].nunique())
+        col_l2.metric("Domains beating us", lost_df["domain"].nunique())
+
+        # Aggregate: which domains beat us most
+        domain_beats = (
+            lost_df.groupby("domain")
+            .agg(keywords_beating=("keyword", "nunique"),
+                 avg_positions_ahead=("positions_ahead", "mean"),
+                 total_volume=("search_volume", "sum"))
+            .sort_values("keywords_beating", ascending=False)
+            .reset_index()
+        )
+        domain_beats["avg_positions_ahead"] = domain_beats["avg_positions_ahead"].round(1)
+
+        fig_beats = px.bar(
+            domain_beats.head(10),
+            x="keywords_beating", y="domain",
+            orientation="h",
+            color="avg_positions_ahead",
+            color_continuous_scale="Reds_r",
+            hover_data={"total_volume": ":,"},
+            labels={"keywords_beating": "Keywords where they beat us", "domain": "",
+                    "avg_positions_ahead": "Avg positions ahead"},
+        )
+        fig_beats.update_layout(
+            height=350, margin=dict(l=0, r=0, t=10, b=0),
+            yaxis=dict(autorange="reversed"),
+        )
+        st.plotly_chart(fig_beats, use_container_width=True)
+
+        # Detail table
+        disp_lost = lost_df.copy()
+        disp_lost["search_volume"] = disp_lost["search_volume"].fillna(0).astype(int).apply(lambda x: f"{x:,}")
+        st.dataframe(
+            disp_lost[["keyword", "domain", "their_position", "our_position",
+                        "positions_ahead", "search_volume", "domain_rating"]]
+            .rename(columns={
+                "keyword": "Keyword", "domain": "Beating domain",
+                "their_position": "Their pos", "our_position": "Our pos",
+                "positions_ahead": "Gap", "search_volume": "Volume",
+                "domain_rating": "Their DR",
+            }),
+            use_container_width=True, hide_index=True, height=500,
+        )
+    else:
+        st.info("No SERP snapshot data with Storylane rankings found. "
+                "Run more SERP pulls to populate this view.")
+
+    # ── SERP deep dive per keyword ──
+    st.divider()
+    st.markdown("#### SERP deep dive")
+    serp_keywords = db.available_serp_keywords()
+    if serp_keywords:
+        selected_kw = st.selectbox("Keyword", serp_keywords, key="t7_kw")
+        kw_serp = db.serp_keyword_detail(selected_kw)
+        if not kw_serp.empty:
+            kw_serp["highlight"] = kw_serp["is_storylane"].apply(
+                lambda x: "🟢 Storylane" if x == 1 else ""
+            )
+            kw_serp["url_short"] = kw_serp["url"].apply(
+                lambda x: x[:80] + "..." if len(str(x)) > 80 else x
+            )
+            st.dataframe(
+                kw_serp[["position", "domain", "highlight", "domain_rating", "traffic", "url_short"]]
+                .rename(columns={
+                    "position": "Pos", "domain": "Domain", "highlight": "",
+                    "domain_rating": "DR", "traffic": "Traffic", "url_short": "URL",
+                }),
+                use_container_width=True, hide_index=True,
+            )
+
+    st.divider()
+    st.markdown(
+        "**How to use this**\n\n"
+        "- **Organic competitors**: shows who competes for the same keywords at the domain level\n"
+        "- **SERP competitors**: shows who actually appears in top 10 for our tracked keywords\n"
+        "- **Lost to detail**: for each keyword, exactly which domains rank above Storylane\n"
+        "- Focus on domains with low DR that outrank you — they're beatable with better content\n"
+        "- High-volume keywords where we're behind are the best targets for content refreshes"
+    )
 
 
 # ── Footer ───────────────────────────────────────────────────────────────

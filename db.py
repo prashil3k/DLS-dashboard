@@ -452,3 +452,101 @@ def top_opportunity_keywords(month: str | None = None, min_volume: int = 100,
     )
     conn.close()
     return df
+
+
+# ── "Lost to" competitor analysis ────────────────────────────────────────
+
+def organic_competitors_summary() -> pd.DataFrame:
+    """Top organic competitors by shared keywords."""
+    conn = get_connection()
+    df = pd.read_sql_query(
+        """SELECT competitor_domain, keywords_common, keywords_competitor,
+                  traffic, domain_rating, share
+           FROM organic_competitors
+           ORDER BY keywords_common DESC""",
+        conn,
+    )
+    conn.close()
+    return df
+
+
+def serp_domain_analysis() -> pd.DataFrame:
+    """Which domains appear most in SERPs for our keywords, and at what positions."""
+    conn = get_connection()
+    df = pd.read_sql_query(
+        """SELECT domain,
+                  COUNT(*) as appearances,
+                  COUNT(DISTINCT keyword) as keywords_covered,
+                  ROUND(AVG(position), 1) as avg_position,
+                  SUM(CASE WHEN position <= 3 THEN 1 ELSE 0 END) as top3_count,
+                  SUM(CASE WHEN position <= 10 THEN 1 ELSE 0 END) as page1_count,
+                  ROUND(AVG(domain_rating), 0) as avg_dr
+           FROM serp_snapshots
+           WHERE domain != 'storylane.io'
+           GROUP BY domain
+           HAVING appearances >= 2
+           ORDER BY keywords_covered DESC, avg_position ASC""",
+        conn,
+    )
+    conn.close()
+    return df
+
+
+def serp_keyword_detail(keyword: str = None) -> pd.DataFrame:
+    """SERP positions for a specific keyword or all keywords."""
+    conn = get_connection()
+    if keyword:
+        df = pd.read_sql_query(
+            """SELECT s.keyword, s.position, s.domain, s.url, s.domain_rating, s.traffic,
+                      CASE WHEN s.domain = 'storylane.io' THEN 1 ELSE 0 END as is_storylane
+               FROM serp_snapshots s
+               WHERE s.keyword = ?
+               ORDER BY s.position""",
+            conn, params=(keyword,),
+        )
+    else:
+        df = pd.read_sql_query(
+            """SELECT s.keyword, s.position, s.domain, s.url, s.domain_rating, s.traffic,
+                      CASE WHEN s.domain = 'storylane.io' THEN 1 ELSE 0 END as is_storylane
+               FROM serp_snapshots s
+               ORDER BY s.keyword, s.position""",
+            conn,
+        )
+    conn.close()
+    return df
+
+
+def lost_to_summary() -> pd.DataFrame:
+    """For each keyword where Storylane ranks, who ranks above us."""
+    conn = get_connection()
+    df = pd.read_sql_query(
+        """WITH storylane_pos AS (
+               SELECT keyword, position as our_position
+               FROM serp_snapshots
+               WHERE domain = 'storylane.io'
+           )
+           SELECT s.keyword, s.domain, s.position as their_position,
+                  sp.our_position,
+                  (sp.our_position - s.position) as positions_ahead,
+                  s.domain_rating, s.traffic,
+                  v.volume as search_volume
+           FROM serp_snapshots s
+           JOIN storylane_pos sp ON s.keyword = sp.keyword
+           LEFT JOIN keyword_volumes v ON s.keyword = v.keyword
+           WHERE s.domain != 'storylane.io'
+             AND s.position < sp.our_position
+           ORDER BY COALESCE(v.volume, 0) DESC, positions_ahead DESC""",
+        conn,
+    )
+    conn.close()
+    return df
+
+
+def available_serp_keywords() -> list:
+    """Keywords that have SERP snapshot data."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT DISTINCT keyword FROM serp_snapshots ORDER BY keyword"
+    ).fetchall()
+    conn.close()
+    return [r[0] for r in rows]

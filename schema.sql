@@ -38,10 +38,35 @@ CREATE TABLE IF NOT EXISTS keyword_volumes (
     volume INTEGER,
     cpc INTEGER,
     difficulty INTEGER,
-    updated_at TEXT DEFAULT (datetime('now'))
+    updated_at TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_kv_volume ON keyword_volumes(volume DESC);
+
+CREATE TABLE IF NOT EXISTS organic_competitors (
+    competitor_domain TEXT PRIMARY KEY,
+    keywords_common INTEGER,
+    keywords_target INTEGER,
+    keywords_competitor INTEGER,
+    traffic INTEGER,
+    domain_rating REAL,
+    share REAL,
+    updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS serp_snapshots (
+    keyword TEXT NOT NULL,
+    position INTEGER NOT NULL,
+    url TEXT,
+    domain TEXT,
+    domain_rating REAL,
+    traffic INTEGER,
+    updated_at TEXT,
+    PRIMARY KEY (keyword, position, url)
+);
+
+CREATE INDEX IF NOT EXISTS idx_serp_domain ON serp_snapshots(domain);
+CREATE INDEX IF NOT EXISTS idx_serp_keyword ON serp_snapshots(keyword);
 
 CREATE TABLE IF NOT EXISTS cluster_config (
     cluster TEXT PRIMARY KEY,
