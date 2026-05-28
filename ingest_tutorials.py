@@ -22,33 +22,6 @@ CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "tutorials", "tutoria
 
 BASE_URL = "https://www.storylane.io/tutorials/"
 
-# Map CMS category names → dashboard cluster names
-# Only needed where they differ (e.g. "ms-excel" → "excel")
-CATEGORY_TO_CLUSTER = {
-    "ms-excel": "excel",
-    "ms-powerpoint": None,       # no dashboard cluster yet
-    "ms-project": None,
-    "ms-teams": "teams",
-    "adobe-indesign": "adobe",
-    "adobe-illustrator": "adobe",
-    "adobe-premiere": "adobe",
-    "adobe-photoshop": "adobe",
-    "adobe-after-effects": "adobe",
-    "adobe-lightroom": "adobe",
-    "google-slides": None,       # no dashboard cluster yet
-    "google-docs": None,
-    "google-sheets": None,
-    "google-calendar": None,
-    "google-drive": None,
-    "power-bi": None,
-    "ms-access": "ms-access",
-    "cisco-webex": None,
-    "microsoft-teams": "teams",
-    "openai": "chatgpt",
-    "chat-gpt": "chatgpt",
-    # Direct matches (category == cluster name) don't need mapping
-}
-
 
 def _parse_created_date(raw: str) -> tuple[str, str] | None:
     """Parse 'Thu Jan 29 2026 10:56:56 GMT+0000 (Coordinated Universal Time)' → (date, month)."""
@@ -60,22 +33,16 @@ def _parse_created_date(raw: str) -> tuple[str, str] | None:
         return None
 
 
-def _resolve_cluster(category: str, slug: str) -> str | None:
-    """Category → cluster, falling back to slug-based assignment."""
-    cat = (category or "").strip().lower()
+def _resolve_cluster(slug: str, title: str) -> str | None:
+    """Cluster from slug + title, same logic as GSC pipeline.
 
-    # Check explicit mapping first
-    if cat in CATEGORY_TO_CLUSTER:
-        return CATEGORY_TO_CLUSTER[cat]
-
-    # Try category as cluster name directly (works for canva, notion, jira, etc.)
-    from cluster import CLUSTER_RULES
-    if cat in CLUSTER_RULES:
-        return cat
-
-    # Fall back to slug matching
+    Uses assign_cluster() which checks URL slug first, then keyword text.
+    This keeps tutorial clustering consistent with how GSC data is clustered.
+    Category is intentionally NOT used here — it reflects publishing intent,
+    not how Google sees the page.
+    """
     url = BASE_URL + slug
-    return assign_cluster(url, "")
+    return assign_cluster(url, title)
 
 
 def main():
@@ -111,7 +78,7 @@ def main():
                 skipped += 1
                 continue
 
-            cluster = _resolve_cluster(category, slug)
+            cluster = _resolve_cluster(slug, title)
             url = BASE_URL + slug
 
             rows.append((
