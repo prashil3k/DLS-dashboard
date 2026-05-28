@@ -4,6 +4,28 @@ This is Storylane's demo-led SEO diagnostic dashboard tracking ~9,000+ tutorial 
 
 The Streamlit dashboard (`streamlit run app.py`) is the visual layer. This file exists so Claude Code can query the same data directly via SQL.
 
+## Session continuity
+
+Prashil works from two different Claude Code accounts (local CLI + a friend's browser account), both connected to the same GitHub repo (`github.com/prashil3k/DLS-dashboard`). GitHub is the bridge — always push all changes so the next session on either account picks up where this one left off. This file (CLAUDE.md) is the single source of truth that travels with the repo.
+
+## What's built
+
+- **7-tab Streamlit dashboard**: cluster scorecard, cluster trends, position filter, query deep dive, Page 2 trap, opportunities, lost-to analysis
+- **SQLite pipeline**: 15/16 months full GSC exports (1,000 rows each) + tutorial metadata (12,315 tutorials)
+- **Conversational query layer**: this file + `db.py` with 15+ query functions
+- **Data flow**: GSC XLSX exports → `ingest_gsc.py` / `ingest.py` → SQLite → Streamlit + Claude Code SQL
+
+## Remaining backlog
+
+1. **Expand SERP snapshots (BLOCKING for replacer analysis)** — currently 9 keywords, 107 results. Need top 3-5 declining keywords per cluster via Ahrefs serp-overview (costs units). Without this, can't analyze who replaced us.
+2. **New cluster discovery** — use Ahrefs keywords-explorer to find high-volume SaaS tools not yet covered. Cross-reference with tutorial_metadata categories.
+3. **AI diagnostic layer** — future "doctor" mode: auto-diagnosis with CMS context, competitor analysis, actionable recs. See `project-dls-ai-layer.md` in memory. Not building now, but architecture should leave room.
+
+## On the horizon
+
+- Keyword-by-keyword audit of Canva cluster (triage: brand displacement vs AIO vs recoverable)
+- Ahrefs analysis of Modash (benchmark: higher traffic at similar revenue)
+
 ## Database
 
 - **Path:** `storylane_seo.db` (this directory)
