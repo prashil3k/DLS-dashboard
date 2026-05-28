@@ -64,6 +64,22 @@ The Streamlit dashboard (`streamlit run app.py`) is the visual layer. This file 
 
 Currently limited to ~9 keywords, 107 results. Used for "lost to" competitor analysis.
 
+### `tutorial_metadata` — Webflow CMS tutorial catalog (INPUT data)
+| Column | Meaning |
+|--------|---------|
+| slug | URL slug (primary key), e.g. "how-to-curve-text-in-canva" |
+| url | Full URL on storylane.io |
+| title | Tutorial title, e.g. "How to Curve Text in Canva" |
+| category | CMS category (141 unique), e.g. "canva", "ms-powerpoint", "jira" |
+| cluster | Dashboard cluster (mapped from category/slug). NULL if no matching cluster |
+| created_date | YYYY-MM-DD when the tutorial was created in Webflow |
+| created_month | YYYY-MM for easy joins with pages_monthly/keywords_monthly |
+| is_draft | 0 = live, 1 = draft |
+
+12,315 tutorials. 49% mapped to a dashboard cluster, rest have categories not yet in the cluster system (Google Slides, PowerPoint, Power BI, etc.). Use `category` for full granularity.
+
+**Key insight:** Use `created_date` (not published/updated) — published dates get overwritten on updates. Created date = when the tutorial was actually built.
+
 ### `cluster_config` — cluster-to-URL-pattern mapping
 Stores the slug patterns and parent domains used to assign pages to clusters.
 
@@ -143,6 +159,27 @@ WHERE month = (SELECT MAX(month) FROM keywords_monthly WHERE month NOT LIKE '%_t
   AND position >= 5.0 AND position <= 15.0
   AND impressions >= 50
 ORDER BY impressions DESC LIMIT 50;
+```
+
+### Input → outcome analysis (tutorial_metadata + pages_monthly)
+- Correlate publishing activity with traffic changes
+- Did a batch of tutorials going live precede a traffic lift?
+- Did a publishing gap precede a traffic decline?
+- Key finding: 7-month publishing halt (Jul 2025–Dec 2025) aligns with steepest traffic decline
+```sql
+-- Publishing volume vs cluster clicks by month
+SELECT t.created_month as month, t.cluster,
+  COUNT(*) as tutorials_created,
+  COALESCE(p.clicks, 0) as clicks
+FROM tutorial_metadata t
+LEFT JOIN (
+  SELECT month, cluster, SUM(clicks) as clicks
+  FROM pages_monthly WHERE cluster IS NOT NULL
+  GROUP BY month, cluster
+) p ON t.created_month = p.month AND t.cluster = p.cluster
+WHERE t.cluster IS NOT NULL
+GROUP BY t.created_month, t.cluster
+ORDER BY t.created_month, tutorials_created DESC;
 ```
 
 ## Useful starting queries
@@ -231,11 +268,11 @@ Canva, Notion — losing both clicks AND impressions. The original brands have r
 
 ## Data constraints
 
-- **Estimated rows**: months backfilled via Ahrefs MCP have only ~100 rows each (pages and keywords). These are flagged with `is_estimated = 1`. Full GSC exports have ~1,000 rows per month.
-- **Full GSC months**: Feb-Apr 2025, Feb-Apr 2026 (6 months). The rest may be thinner.
-- **Current coverage**: 18 months from Dec 2024 to May 2026
-- **Aggregate rows**: some rows have month values like `YYYY-MM_to_YYYY-MM` — always exclude these with `month NOT LIKE '%_to_%'` in queries
-- **Search volume**: ~497 keywords have volume data from Ahrefs keyword explorer. Most keywords are unmatched — volume queries should use LEFT JOIN and handle NULLs.
+- **GSC coverage**: 15 full months (Feb 2025–Apr 2026, 1,000 rows each) + 1 thin month (May 2026, 100 rows from Ahrefs). Dec 2024 and Jan 2025 were unavailable from GSC and removed.
+- **Tutorial metadata**: 12,315 tutorials (Feb 2024–May 2026). 49% mapped to dashboard clusters, rest are categories without cluster mapping. Use `category` for full coverage.
+- **Search volume**: ~497 keywords have volume data from Ahrefs. Most are unmatched — volume queries should LEFT JOIN and handle NULLs.
+- **SERP snapshots**: ~9 keywords, 107 results. Limited coverage for "lost to" analysis.
+- **Aggregate rows**: removed from DB. No `_to_` months exist, but keep the `NOT LIKE '%_to_%'` filter as a safety habit.
 
 ## Python query layer
 

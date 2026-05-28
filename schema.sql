@@ -73,3 +73,18 @@ CREATE TABLE IF NOT EXISTS cluster_config (
     url_patterns TEXT NOT NULL,
     parent_domain TEXT
 );
+
+CREATE TABLE IF NOT EXISTS tutorial_metadata (
+    slug TEXT PRIMARY KEY,
+    url TEXT,
+    title TEXT NOT NULL,
+    category TEXT,
+    cluster TEXT,
+    created_date TEXT NOT NULL,
+    created_month TEXT NOT NULL,
+    is_draft INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_tm_cluster ON tutorial_metadata(cluster);
+CREATE INDEX IF NOT EXISTS idx_tm_category ON tutorial_metadata(category);
+CREATE INDEX IF NOT EXISTS idx_tm_created_month ON tutorial_metadata(created_month);

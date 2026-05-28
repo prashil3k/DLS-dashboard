@@ -11,7 +11,7 @@ st.set_page_config(page_title="Storylane SEO Dashboard", layout="wide", page_ico
 st.title("Storylane · Demo-led SEO dashboard")
 
 # DB version gate: if the on-disk DB is stale, nuke and rebuild from repo copy
-DB_VERSION = 6  # bump this to force a rebuild on Streamlit Cloud
+DB_VERSION = 7  # bump this to force a rebuild on Streamlit Cloud
 db.ensure_db_version(DB_VERSION)
 
 if not db.has_data():
