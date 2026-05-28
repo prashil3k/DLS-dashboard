@@ -274,6 +274,43 @@ Canva, Notion — losing both clicks AND impressions. The original brands have r
 - **SERP snapshots**: ~9 keywords, 107 results. Limited coverage for "lost to" analysis.
 - **Aggregate rows**: removed from DB. No `_to_` months exist, but keep the `NOT LIKE '%_to_%'` filter as a safety habit.
 
+## How to use this tool
+
+This dashboard isn't just for looking at numbers. It's a diagnostic + ideation layer. When Prashil opens a chat, the goal is to come out with **specific experiments to run that week**.
+
+### Diagnostic workflow
+
+1. **Identify the bleeding** — which clusters lost the most top-1.5 keywords or clicks in the last 1-3 months? Focus on clusters that are still worth saving (have meaningful traffic left).
+
+2. **Diagnose the cause** — for each declining cluster, determine which pattern:
+   - AIO tax (position stable, CTR collapsing) → can't outrank AI Overview, need to pivot content strategy
+   - Brand displacement (position dropping) → the parent domain is reclaiming its turf. Check if the replacer is the parent domain or a third party.
+   - Content staleness (impressions dropping) → Google is deprioritizing old content. This is fixable.
+   - Publishing gap → did we stop publishing in this cluster? Check tutorial_metadata for creation gaps.
+
+3. **Analyze the replacers** — for keywords where we lost position, who took our spot? Ignore parent domain takeovers (canva.com beating us on "canva" queries is structural, not actionable). Focus on third-party sites that outrank us — analyze their content, schema markup, tech SEO, and domain authority to understand what gave them the edge.
+
+4. **Generate experiment hypotheses** — specific, testable changes:
+   - Content refresh experiments (update stale top pages)
+   - Schema/structured data additions
+   - Internal linking changes
+   - New content targeting Page 2 trap keywords
+   - Consolidation of thin keyword variants
+
+5. **Find new clusters** — look for SaaS tools with high keyword volume that we haven't covered. Use category distribution in tutorial_metadata to see what's already there vs what's missing. Use Ahrefs keywords-explorer for volume validation.
+
+### Key principles for experiments
+- Parent domain displacement is NOT actionable — don't waste time competing with canva.com on "canva" queries
+- AIO displacement requires strategy pivots, not content tweaks
+- Content staleness is the most fixable problem
+- Focus experiments on clusters where we still have positions 2-10 (recoverable) not clusters we've been pushed off entirely
+- Each experiment should be scoped to one cluster or a few keywords, run for 2-4 weeks, then measured
+
+### Data gaps for this workflow
+- **SERP snapshots are thin** (9 keywords). To properly analyze replacers, need to expand to top 3-5 declining keywords per cluster via Ahrefs serp-overview tool (costs units).
+- **Competitor page content** is not stored — when analyzing a replacer, Claude Code should fetch and analyze the live page (content structure, schema, headers, word count) on the fly.
+- **New cluster discovery** needs keyword explorer data for tools not yet in the system.
+
 ## Python query layer
 
 The `db.py` module has pre-built query functions that return pandas DataFrames. Useful if running Python instead of raw SQL:
