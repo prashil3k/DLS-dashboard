@@ -54,7 +54,7 @@ def _format_month_label(m: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
     "📊 Cluster scorecard",
     "📈 Cluster trends",
     "🔀 Position filter",
@@ -62,6 +62,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "🎯 Page 2 trap",
     "💎 Opportunities",
     "⚔️ Lost to",
+    "🔗 Input → output",
 ])
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1148,6 +1149,136 @@ with tab7:
         "- **Lost to detail**: for each keyword, exactly which domains rank above Storylane\n"
         "- Focus on domains with low DR that outrank you — they're beatable with better content\n"
         "- High-volume keywords where we're behind are the best targets for content refreshes"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TAB 8 — Input → Output correlation
+# ═══════════════════════════════════════════════════════════════════════════
+with tab8:
+    st.subheader("Input → output correlation")
+    st.caption(
+        "Correlate what we built (tutorials created) with what happened (traffic). "
+        "A declining cluster might just reflect a publishing gap, not a ranking problem."
+    )
+
+    # Cluster summary table
+    tut_summary = db.cluster_tutorial_summary()
+    if tut_summary.empty:
+        st.warning("No tutorial metadata loaded. Run ingest_tutorials.py first.")
+    else:
+        # Per-cluster deep dive
+        io_cluster = st.selectbox(
+            "Select cluster", clusters, key="io_cluster",
+            index=clusters.index("canva") if "canva" in clusters else 0,
+        )
+
+        io_df = db.input_output_correlation(io_cluster)
+        if io_df.empty:
+            st.info(f"No data for {io_cluster}.")
+        else:
+            # Dual-axis chart: bar = tutorials created, line = clicks
+            fig_io = make_subplots(specs=[[{"secondary_y": True}]])
+
+            # Cumulative tutorials as area (background context)
+            fig_io.add_trace(
+                go.Scatter(
+                    x=io_df["month"], y=io_df["cumulative_tutorials"],
+                    name="Cumulative tutorials",
+                    fill="tozeroy", fillcolor="rgba(99, 110, 250, 0.08)",
+                    line=dict(color="rgba(99, 110, 250, 0.3)", width=1, dash="dot"),
+                    hovertemplate="%{y} tutorials total<extra></extra>",
+                ),
+                secondary_y=True,
+            )
+
+            # Tutorials created per month as bars
+            fig_io.add_trace(
+                go.Bar(
+                    x=io_df["month"], y=io_df["tutorials_created"],
+                    name="Tutorials created",
+                    marker_color="rgba(99, 110, 250, 0.6)",
+                    hovertemplate="%{y} created<extra></extra>",
+                ),
+                secondary_y=True,
+            )
+
+            # Clicks as primary line
+            fig_io.add_trace(
+                go.Scatter(
+                    x=io_df["month"], y=io_df["clicks"],
+                    name="Clicks",
+                    line=dict(color="#EF553B", width=2.5),
+                    hovertemplate="%{y:,.0f} clicks<extra></extra>",
+                ),
+                secondary_y=False,
+            )
+
+            # Top 1.5 count as secondary line
+            fig_io.add_trace(
+                go.Scatter(
+                    x=io_df["month"], y=io_df["top_1_5"],
+                    name="Top 1.5 keywords",
+                    line=dict(color="#00CC96", width=2, dash="dash"),
+                    hovertemplate="%{y} keywords at position ≤1.5<extra></extra>",
+                ),
+                secondary_y=False,
+            )
+
+            fig_io.update_layout(
+                height=450, barmode="overlay", hovermode="x unified",
+                legend=dict(orientation="h", y=-0.15),
+                margin=dict(t=30),
+            )
+            fig_io.update_yaxes(title_text="Clicks / Top 1.5 keywords", secondary_y=False)
+            fig_io.update_yaxes(title_text="Tutorials", secondary_y=True)
+
+            st.plotly_chart(fig_io, use_container_width=True)
+
+            # Context callout: identify publishing gaps
+            cluster_info = tut_summary[tut_summary["cluster"] == io_cluster]
+            if not cluster_info.empty:
+                info = cluster_info.iloc[0]
+                gap_count = int(info["gap_period_count"])
+                total = int(info["tutorials"])
+
+                cols = st.columns(4)
+                cols[0].metric("Total tutorials", f"{total:,}")
+                cols[1].metric("First created", str(info["first_created"])[:10])
+                cols[2].metric("Last created", str(info["last_created"])[:10])
+                cols[3].metric("Created Jul–Dec 2025", gap_count,
+                               help="Publishing gap period. 0 = no content created during the 7-month gap.")
+
+        # All-clusters publishing timeline heatmap
+        st.divider()
+        st.markdown("**Publishing activity across all clusters**")
+
+        all_creation = db.tutorial_creation_by_cluster()
+        if not all_creation.empty:
+            pivot = all_creation.pivot_table(
+                index="cluster", columns="month", values="tutorials_created",
+                fill_value=0, aggfunc="sum",
+            )
+            # Only show months with any activity and clusters with >10 total tutorials
+            pivot = pivot.loc[pivot.sum(axis=1) > 10]
+            if not pivot.empty:
+                fig_heat = px.imshow(
+                    pivot,
+                    color_continuous_scale="Blues",
+                    aspect="auto",
+                    labels=dict(x="Month", y="Cluster", color="Tutorials"),
+                )
+                fig_heat.update_layout(height=max(300, len(pivot) * 22), margin=dict(t=10))
+                st.plotly_chart(fig_heat, use_container_width=True)
+
+    st.divider()
+    st.markdown(
+        "**How to read this**\n\n"
+        "- **Blue bars** = tutorials created that month (input). **Red line** = clicks (outcome).\n"
+        "- If clicks decline but we stopped creating content → publishing gap, not a ranking problem.\n"
+        "- If clicks decline despite continued creation → real ranking/AIO issue.\n"
+        "- **Cumulative tutorials** (dotted area) shows total content investment over time.\n"
+        "- The heatmap below reveals which clusters had sustained investment vs. sporadic bursts."
     )
 
 

@@ -321,17 +321,84 @@ This dashboard isn't just for looking at numbers. It's a diagnostic + ideation l
 
 5. **Find new clusters** — look for SaaS tools with high keyword volume that we haven't covered. Use category distribution in tutorial_metadata to see what's already there vs what's missing. Use Ahrefs keywords-explorer for volume validation.
 
+### Reasoning principles
+
+These govern HOW to think when interpreting data. Without these, raw numbers mislead.
+
+#### Always separate input from outcome
+
+Every trend has two possible explanations: something we did (input) or something that happened to us (outcome). Before diagnosing a decline, ALWAYS check tutorial_metadata first:
+- When were tutorials for this cluster created? If creation stopped, traffic dropping is expected, not a mystery.
+- If we created 500 tutorials but only 50 show up in GSC, the gap might be indexation or relevance, not ranking loss.
+- A page created 2 months ago and a page created 14 months ago cannot be compared on raw traffic — normalize by time in the sun.
+
+```sql
+-- Before diagnosing any cluster, run this first
+SELECT cluster, COUNT(*) as tutorials,
+  MIN(created_date) as first, MAX(created_date) as last,
+  COUNT(CASE WHEN created_month >= '2025-07' AND created_month <= '2025-12' THEN 1 END) as gap_period
+FROM tutorial_metadata WHERE cluster = '{cluster}' GROUP BY cluster;
+```
+
+If the input story explains the output, say so. Don't invent a ranking problem where a publishing gap is the real cause.
+
+#### Defensibility filter
+
+Not all clusters are worth the same effort. Our edge is strongest where:
+- **Official docs are weak** (Jira, Confluence, Bitbucket, Linear) — complex workflows where an interactive demo tutorial adds genuine value over text docs
+- **The query is multi-step** — AIO can't easily replicate a 10-step workflow with screenshots
+- **The parent brand hasn't invested in SEO for this** — e.g. NotebookLM, Grok (newer tools)
+
+Our edge is weakest where:
+- **The query is trivially simple** ("how to do X in canva") — AIO answers it in one sentence, parent brand has a dedicated help page
+- **The parent brand has reclaimed its SEO** (Canva, Notion) — structural loss, not fixable by content tweaks
+
+When suggesting experiments or new clusters, always apply this filter. Don't recommend investing in structurally indefensible positions.
+
+#### Replacer analysis: the "why" matters more than the "who"
+
+When analyzing who replaced us on a keyword, the "who" is just a database lookup. The value is in the "why":
+- **Content depth** — did the replacer write a more comprehensive guide? Check word count, number of steps, visual aids.
+- **Content freshness** — is their page more recently updated? Google favors fresh content for how-to queries.
+- **Schema/structured data** — do they have FAQ schema, HowTo schema, or video markup that earns SERP features?
+- **Domain authority** — is it just a DA gap? If a DR 90 site is outranking us, that's harder to overcome than a DR 40 site with better content.
+- **User experience** — do they have interactive elements, video, better mobile experience?
+
+When reporting replacer analysis, always structure as: who → what they have that we don't → is it fixable → specific action if yes.
+
+#### New cluster discovery: scale bar
+
+We have 12,315 tutorials across 100+ tools. Large clusters have 200-500+ tutorials, which means the original keyword pool was 5x+ that size (most keywords are zero-volume long-tail that still drive aggregate traffic). When evaluating a new cluster:
+- It must have potential for **at least 200+ tutorial-worthy keywords** to be worth the investment
+- Check if the tool already has tutorials in our unclustered categories (tutorial_metadata.category) — partial coverage might exist
+- Validate with Ahrefs keywords-explorer: look for "how to [action] in [tool]" pattern volume
+- Prefer tools where official documentation is weak or overly technical — that's where our interactive demo format wins
+
+#### Experiment quality bar
+
+An experiment is something we **actually change and measure**. Analysis and discovery are not experiments. For each experiment:
+- **What changes**: specific pages, specific meta, specific content structure
+- **What we measure**: which metric, over what timeframe (minimum 3-4 weeks)
+- **What success looks like**: e.g. "CTR improves from 0.5% to 2%+ on these 10 keywords"
+- **Scope**: one cluster or a handful of keywords, not "improve everything"
+
+Types of valid experiments:
+- **Meta regeneration** — rewrite formulaic title/description tags to add value signals ("with screenshots", "2026 updated", "step-by-step")
+- **Query consolidation** — merge thin pages targeting the same intent into one comprehensive page, redirect the rest
+- **Content refresh** — update stale pages with current screenshots, steps, and context
+- **Schema additions** — add HowTo or FAQ structured data to existing pages
+
+### Data gaps for this workflow
+- **SERP snapshots are thin** (9 keywords). To properly analyze replacers, need to expand to top 3-5 declining keywords per cluster via Ahrefs serp-overview tool (costs units).
+- **Competitor page content** is not stored — when analyzing a replacer, Claude Code should fetch and analyze the live page (content structure, schema, headers, word count) on the fly.
+- **New cluster discovery** needs keyword explorer data for tools not yet in the system.
+
 ### Key principles for experiments
 - Parent domain displacement is NOT actionable — don't waste time competing with canva.com on "canva" queries
 - AIO displacement requires strategy pivots, not content tweaks
 - Content staleness is the most fixable problem
 - Focus experiments on clusters where we still have positions 2-10 (recoverable) not clusters we've been pushed off entirely
 - Each experiment should be scoped to one cluster or a few keywords, run for 2-4 weeks, then measured
-
-### Data gaps for this workflow
-- **SERP snapshots are thin** (9 keywords). To properly analyze replacers, need to expand to top 3-5 declining keywords per cluster via Ahrefs serp-overview tool (costs units).
-- **Competitor page content** is not stored — when analyzing a replacer, Claude Code should fetch and analyze the live page (content structure, schema, headers, word count) on the fly.
-- **New cluster discovery** needs keyword explorer data for tools not yet in the system.
 
 ## Python query layer
 

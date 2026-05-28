@@ -550,3 +550,84 @@ def available_serp_keywords() -> list:
     ).fetchall()
     conn.close()
     return [r[0] for r in rows]
+
+
+def tutorial_creation_by_cluster(cluster: str | None = None) -> pd.DataFrame:
+    """Monthly tutorial creation counts by cluster."""
+    conn = get_connection()
+    where = "WHERE cluster IS NOT NULL"
+    params = []
+    if cluster:
+        where += " AND cluster = ?"
+        params.append(cluster)
+    df = pd.read_sql_query(f"""
+        SELECT created_month as month, cluster, COUNT(*) as tutorials_created
+        FROM tutorial_metadata
+        {where}
+        GROUP BY created_month, cluster
+        ORDER BY created_month
+    """, conn, params=params)
+    conn.close()
+    return df
+
+
+def input_output_correlation(cluster: str) -> pd.DataFrame:
+    """Join tutorial creation (input) with performance (output) by month for a cluster.
+
+    Returns one row per month with: tutorials_created, cumulative_tutorials,
+    clicks, impressions, top_1_5 count.
+    """
+    conn = get_connection()
+    df = pd.read_sql_query("""
+        WITH creation AS (
+            SELECT created_month as month, COUNT(*) as tutorials_created
+            FROM tutorial_metadata
+            WHERE cluster = ?
+            GROUP BY created_month
+        ),
+        perf AS (
+            SELECT month, SUM(clicks) as clicks, SUM(impressions) as impressions,
+                COUNT(DISTINCT CASE WHEN position <= 1.5 THEN keyword END) as top_1_5
+            FROM keywords_monthly
+            WHERE cluster = ? AND month NOT LIKE '%_to_%'
+            GROUP BY month
+        ),
+        all_months AS (
+            SELECT DISTINCT month FROM (
+                SELECT month FROM creation
+                UNION
+                SELECT month FROM perf
+            )
+        )
+        SELECT m.month,
+            COALESCE(c.tutorials_created, 0) as tutorials_created,
+            COALESCE(p.clicks, 0) as clicks,
+            COALESCE(p.impressions, 0) as impressions,
+            COALESCE(p.top_1_5, 0) as top_1_5
+        FROM all_months m
+        LEFT JOIN creation c ON m.month = c.month
+        LEFT JOIN perf p ON m.month = p.month
+        ORDER BY m.month
+    """, conn, params=[cluster, cluster])
+    conn.close()
+    if not df.empty:
+        df['cumulative_tutorials'] = df['tutorials_created'].cumsum()
+    return df
+
+
+def cluster_tutorial_summary() -> pd.DataFrame:
+    """Summary of tutorial creation per cluster: count, first/last created, gap periods."""
+    conn = get_connection()
+    df = pd.read_sql_query("""
+        SELECT cluster,
+            COUNT(*) as tutorials,
+            MIN(created_date) as first_created,
+            MAX(created_date) as last_created,
+            COUNT(CASE WHEN created_month >= '2025-07' AND created_month <= '2025-12' THEN 1 END) as gap_period_count
+        FROM tutorial_metadata
+        WHERE cluster IS NOT NULL
+        GROUP BY cluster
+        ORDER BY tutorials DESC
+    """, conn)
+    conn.close()
+    return df
