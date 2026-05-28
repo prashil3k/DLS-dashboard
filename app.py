@@ -241,15 +241,16 @@ with tab2:
         "A shrinking top-3 line means you're losing the queries that actually drive clicks."
     )
 
+    bucket_cfg = [
+        ("top_1", "Top 1 (position ≤1.5)", "#0d6efd", 3),
+        ("top_3", "Top 3",                  "#198754", 2.5),
+        ("top_5", "Top 5",                  "#fd7e14", 2),
+        ("top_10", "Top 10",                "#6c757d", 1.5),
+    ]
+
     qpc = db.query_position_counts(t2_cluster)
     if not qpc.empty:
         fig_q = go.Figure()
-        bucket_cfg = [
-            ("top_1", "Top 1 (position ≤1.5)", "#0d6efd", 3),
-            ("top_3", "Top 3",                  "#198754", 2.5),
-            ("top_5", "Top 5",                  "#fd7e14", 2),
-            ("top_10", "Top 10",                "#6c757d", 1.5),
-        ]
         for col, label, color, width in bucket_cfg:
             est_mask = qpc["is_estimated"] == 1
             # Real segments
