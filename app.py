@@ -420,7 +420,8 @@ with tab2:
     st.markdown("### Average position")
     st.markdown(
         "> **What this shows**: the cluster's overall average ranking. "
-        "Lower = better. A rising line means you're drifting off page 1."
+        "The axis is inverted so up = better (closer to position 1). "
+        "A dropping line means you're losing rankings."
     )
 
     if not trend.empty:
@@ -1177,10 +1178,22 @@ with tab8:
         if io_df.empty:
             st.info(f"No data for {io_cluster}.")
         else:
+            st.info(
+                "⚠️ **Performance data (clicks, rankings) is only available from Feb 2025 onwards.** "
+                "Tutorial creation data goes back to early 2024. The flat performance line before "
+                "Feb 2025 does not mean zero traffic — it means we don't have GSC data for that period. "
+                "For context: the DLS program grew from ~25K to ~150K monthly clicks between Feb–Aug 2024."
+            )
+
+            # Only show performance lines from Feb 2025 onwards
+            # Split io_df into creation-only months and months with perf data
+            perf_start = "2025-02"
+            io_perf = io_df[io_df["month"] >= perf_start].copy()
+
             # Dual-axis chart: bar = tutorials created, line = clicks
             fig_io = make_subplots(specs=[[{"secondary_y": True}]])
 
-            # Cumulative tutorials as area (background context)
+            # Cumulative tutorials as area (full timeline — this data is complete)
             fig_io.add_trace(
                 go.Scatter(
                     x=io_df["month"], y=io_df["cumulative_tutorials"],
@@ -1192,7 +1205,7 @@ with tab8:
                 secondary_y=True,
             )
 
-            # Tutorials created per month as bars
+            # Tutorials created per month as bars (full timeline)
             fig_io.add_trace(
                 go.Bar(
                     x=io_df["month"], y=io_df["tutorials_created"],
@@ -1203,10 +1216,10 @@ with tab8:
                 secondary_y=True,
             )
 
-            # Clicks as primary line
+            # Clicks as primary line (only from Feb 2025)
             fig_io.add_trace(
                 go.Scatter(
-                    x=io_df["month"], y=io_df["clicks"],
+                    x=io_perf["month"], y=io_perf["clicks"],
                     name="Clicks",
                     line=dict(color="#EF553B", width=2.5),
                     hovertemplate="%{y:,.0f} clicks<extra></extra>",
@@ -1214,15 +1227,22 @@ with tab8:
                 secondary_y=False,
             )
 
-            # Top 1.5 count as secondary line
+            # Top 1.5 count as secondary line (only from Feb 2025)
             fig_io.add_trace(
                 go.Scatter(
-                    x=io_df["month"], y=io_df["top_1_5"],
+                    x=io_perf["month"], y=io_perf["top_1_5"],
                     name="Top 1.5 keywords",
                     line=dict(color="#00CC96", width=2, dash="dash"),
                     hovertemplate="%{y} keywords at position ≤1.5<extra></extra>",
                 ),
                 secondary_y=False,
+            )
+
+            # Add vertical line marking where performance data starts
+            fig_io.add_vline(
+                x=perf_start, line_dash="dot", line_color="rgba(0,0,0,0.3)",
+                annotation_text="GSC data starts", annotation_position="top left",
+                annotation_font_size=10, annotation_font_color="rgba(0,0,0,0.5)",
             )
 
             fig_io.update_layout(
