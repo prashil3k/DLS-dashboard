@@ -10,16 +10,71 @@ Prashil works from two different Claude Code accounts (local CLI + a friend's br
 
 ## What's built
 
-- **7-tab Streamlit dashboard**: cluster scorecard, cluster trends, position filter, query deep dive, Page 2 trap, opportunities, lost-to analysis
+- **8-tab Streamlit dashboard**: cluster scorecard, cluster trends, position filter, query deep dive, Page 2 trap, opportunities, lost-to analysis, input→output correlation
 - **SQLite pipeline**: 15/16 months full GSC exports (1,000 rows each) + tutorial metadata (12,315 tutorials)
-- **Conversational query layer**: this file + `db.py` with 15+ query functions
+- **SERP snapshots**: 17 keywords, 155 results across 8 clusters. Key finding: every single keyword has AI Overview at position 1.
+- **Conversational query layer**: this file + `db.py` with 18+ query functions
 - **Data flow**: GSC XLSX exports → `ingest_gsc.py` / `ingest.py` → SQLite → Streamlit + Claude Code SQL
+
+## The DLS story (context for any new session)
+
+- **Feb 2024**: started creating tutorials. Ramped from 1→144→226→364/month
+- **Aug 2024**: grew from ~25K to ~150K monthly clicks in 6 months
+- **Feb 2025** (first month with GSC data in DB): 26,683 clicks, 228 top-1.5 keywords. **68% of traffic was Canva alone** (18,072 clicks)
+- **Jul 2025–Dec 2025**: publishing stopped (7-month gap, only 57 tutorials in Jul then nothing)
+- **Jan 2026**: restarted at massive scale. 234→707→957→858→3,320 tutorials/month
+- **Apr 2026**: clicks at 7,213 (-73% from peak), top-1.5 at 7 (-97%). Restart hasn't stabilized performance yet.
+- **Only 2 clusters grew**: Claude (+22%) and Grok (new). Everything else down 50-98%.
+
+## Dashboard usability redesign (ACTIVE — brainstorming, not yet built)
+
+### The problem
+
+The dashboard is organized by metrics and individual clusters. With 100+ clusters of unequal weight, you pick one from a dropdown, see lines going down, pick another, lines going down. After 10 minutes you've looked at 5 clusters and learned nothing except "everything is bad." The dashboard never answers: where should we point our 3,000+ tutorials/month?
+
+### Proposed redesign
+
+**View 1: Allocation map (scatter plot)**
+- X = tutorials invested, Y = clicks returned, per cluster
+- Quadrants: top-right = working, bottom-right = wasted effort, top-left = underfed opportunity, bottom-left = ignore
+- Key data: Grok (51.9 clicks/tutorial), Claude (7.1), NotebookLM (6.9) are high-efficiency. Adobe (0.03), Salesforce (0.04), HubSpot (0.0) are zero-return.
+
+**View 2: Health buckets (auto-classify every cluster)**
+- 🟢 Growing — clicks trending up (Grok, Claude)
+- 🟡 Stable — holding position (GitLab, Bitbucket, Linear)
+- 🟠 Declining but recoverable — still has positions 2-10
+- 🔴 Structurally lost — parent brand/AIO killed it (Canva, Notion, Figma)
+- Per bucket: total tutorials, total clicks, clicks-per-tutorial efficiency
+
+**View 3: Creation flow at portfolio level**
+- Where are new tutorials going month by month? Into green clusters or red ones?
+- Input/output tab exists per-cluster — needs a portfolio-level rollup
+
+**View 4: Detailed drill-down**
+- Existing 8 tabs become the "dig deeper" layer, entered after triage view tells you where to look
+
+### Three modes the dashboard should serve
+1. **"What's getting worse?"** — triage, ranked by actionability not traffic
+2. **"What should I do this week?"** — experiment candidates surfaced from data
+3. **"Is my experiment working?"** — before/after tracking (needs experiment log, not built yet)
+
+### Principles for the redesign
+- Portfolio first, individual cluster second
+- Show mismatches (investing where returns are zero, not investing where efficiency is high)
+- Auto-classify clusters so the user doesn't have to manually check each one
+- The dashboard should tell you where to look — the conversational layer handles the "why" and "what to do"
 
 ## Remaining backlog
 
-1. **Expand SERP snapshots (BLOCKING for replacer analysis)** — currently 9 keywords, 107 results. Need top 3-5 declining keywords per cluster via Ahrefs serp-overview (costs units). Without this, can't analyze who replaced us.
-2. **New cluster discovery** — use Ahrefs keywords-explorer to find high-volume SaaS tools not yet covered. Cross-reference with tutorial_metadata categories.
-3. **AI diagnostic layer** — future "doctor" mode: auto-diagnosis with CMS context, competitor analysis, actionable recs. See `project-dls-ai-layer.md` in memory. Not building now, but architecture should leave room.
+1. **Dashboard usability redesign** — see above. This is the top priority.
+2. **New cluster discovery** — use Ahrefs keywords-explorer to find high-volume SaaS tools not yet covered. Need 200+ tutorial-worthy keywords per cluster to justify investment.
+3. **AI diagnostic layer** — future "doctor" mode, parked. Learn from the conversational layer first, then codify.
+
+## Experiment ideas (pinned, not yet run)
+
+- **Query consolidation — Canva to Google Slides**: 19 keyword variants, 10,372 impressions, 120 clicks. Consolidate into one comprehensive page, redirect the rest.
+- **Meta regeneration**: top 10 keywords with position ≤5 and CTR <2%. Rewrite formulaic titles to add value signals ("step-by-step", "2026 updated").
+- **Broader Canva topic consolidation**: superscript (2,671 impr), youtube (2,430), download-image (2,022), stretch (1,713). Same treatment as slides.
 
 ## On the horizon
 
